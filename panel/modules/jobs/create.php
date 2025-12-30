@@ -1,7 +1,12 @@
-<!-- create.php - Keep it simple! -->
-
 <?php
-require_once __DIR__ . '/../_common.php';
+/**
+ * Create Job Form
+ * Fields: Client, Title, Description, Location, Salary, Show Salary, Assigned Recruiter, Notes
+ */
+if (!defined('INCLUDED_FROM_INDEX')) {
+    require_once __DIR__ . '/../_common.php';
+}
+
 use ProConsultancy\Core\Permission;
 use ProConsultancy\Core\Database;
 use ProConsultancy\Core\Auth;
@@ -9,189 +14,215 @@ use ProConsultancy\Core\CSRFToken;
 
 Permission::require('jobs', 'create');
 
-$pageTitle = 'Create Job';
-require_once __DIR__ . '/../../includes/header.php';
-
-// Get clients for dropdown
+$user = Auth::user();
 $db = Database::getInstance();
 $conn = $db->getConnection();
-$clients = $conn->query("SELECT client_code, company_name FROM clients WHERE is_active = 1 ORDER BY company_name")->fetch_all(MYSQLI_ASSOC);
-$recruiters = $conn->query("SELECT user_code, name FROM users WHERE level IN ('recruiter', 'manager') AND is_active = 1 ORDER BY name")->fetch_all(MYSQLI_ASSOC);
 
 // Generate job code
-$jobCode = 'JOB-' . date('Ymd') . '-' . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
+$job_code = 'JOB' . date('Ymd') . strtoupper(substr(uniqid(), -4));
+
+// Get clients
+$clientsSQL = "
+    SELECT client_code, company_name 
+    FROM clients 
+    WHERE status = 'active' 
+    AND deleted_at IS NULL 
+    ORDER BY company_name
+";
+$clients = $conn->query($clientsSQL)->fetch_all(MYSQLI_ASSOC);
+
+// Get recruiters for assignment
+$recruitersSQL = "
+    SELECT user_code, name 
+    FROM users 
+    WHERE is_active = 1 
+    ORDER BY name
+";
+$recruiters = $conn->query($recruitersSQL)->fetch_all(MYSQLI_ASSOC);
+
+// Pre-fill client if passed
+$preselected_client = input('client_code', '');
+
+$pageTitle = 'Create New Job';
+$breadcrumbs = [
+    ['title' => 'Dashboard', 'url' => '/panel/'],
+    ['title' => 'Jobs', 'url' => '/panel/modules/jobs/?action=list'],
+    ['title' => 'Create', 'url' => '']
+];
+
+require_once __DIR__ . '/../../includes/header.php';
 ?>
 
-<div class="card">
-    <div class="card-header">
-        <h5 class="mb-0">Create New Job</h5>
-    </div>
-    <div class="card-body">
-        <form method="POST" action="handlers/create.php" id="jobForm">
-            <?= CSRFToken::field() ?>
-            <input type="hidden" name="job_code" value="<?= $jobCode ?>">
-            
-            <!-- Basic Information -->
-            <div class="row mb-4">
-                <div class="col-12">
-                    <h6 class="text-primary">Basic Information</h6>
-                    <hr>
-                </div>
-                
-                <div class="col-md-8 mb-3">
-                    <label class="form-label">Job Title *</label>
-                    <input type="text" class="form-control" name="job_title" required 
-                           placeholder="e.g., Senior Java Developer">
-                </div>
-                
-                <div class="col-md-4 mb-3">
-                    <label class="form-label">Job Code</label>
-                    <input type="text" class="form-control" value="<?= $jobCode ?>" readonly>
-                </div>
-                
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Client *</label>
-                    <select class="form-select" name="client_code" required>
-                        <option value="">Select Client...</option>
-                        <?php foreach ($clients as $client): ?>
-                            <option value="<?= $client['client_code'] ?>">
-                                <?= escape($client['company_name']) ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Assigned To *</label>
-                    <select class="form-select" name="assigned_to" required>
-                        <option value="<?= Auth::userCode() ?>" selected>Myself</option>
-                        <?php foreach ($recruiters as $recruiter): ?>
-                            <?php if ($recruiter['user_code'] !== Auth::userCode()): ?>
-                                <option value="<?= $recruiter['user_code'] ?>">
-                                    <?= escape($recruiter['name']) ?>
-                                </option>
-                            <?php endif; ?>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Job Information</h5>
             </div>
-            
-            <!-- Job Description -->
-            <div class="row mb-4">
-                <div class="col-12">
-                    <h6 class="text-primary">Job Description</h6>
-                    <hr>
-                </div>
-                
-                <div class="col-12 mb-3">
-                    <label class="form-label">Description *</label>
-                    <textarea id="description" name="description" class="form-control" rows="15" required></textarea>
-                    <small class="form-text text-muted">
-                        Use the editor above to format your job description
-                    </small>
-                </div>
-            </div>
-            
-            <!-- Compensation -->
-            <div class="row mb-4">
-                <div class="col-12">
-                    <h6 class="text-primary">Compensation (Optional)</h6>
-                    <hr>
-                </div>
-                
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Salary Min (EUR)</label>
-                    <input type="number" class="form-control" name="salary_min" step="0.01" placeholder="45000">
-                </div>
-                
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Salary Max (EUR)</label>
-                    <input type="number" class="form-control" name="salary_max" step="0.01" placeholder="65000">
-                </div>
-            </div>
-            
-            <!-- Internal Notes -->
-            <div class="row mb-4">
-                <div class="col-12">
-                    <h6 class="text-primary">Internal Notes (Not shown to candidates)</h6>
-                    <hr>
-                </div>
-                
-                <div class="col-12 mb-3">
-                    <textarea class="form-control" name="internal_notes" rows="3" 
-                              placeholder="Add any internal notes, requirements, or comments..."></textarea>
-                </div>
-            </div>
-            
-            <!-- Form Actions -->
-            <div class="row">
-                <div class="col-12">
-                    <hr>
-                    <div class="d-flex justify-content-between">
-                        <a href="list.php" class="btn btn-outline-secondary">Cancel</a>
+            <div class="card-body">
+                <form method="POST" action="handlers/create.php" id="jobForm">
+                    <?= CSRFToken::field() ?>
+                    <input type="hidden" name="job_code" value="<?= $job_code ?>">
+                    
+                    <!-- Basic Information -->
+                    <div class="row mb-4">
+                        <div class="col-12">
+                            <h6 class="text-primary">Basic Information</h6>
+                            <hr>
+                        </div>
                         
-                        <div>
-                            <button type="submit" name="action" value="save_draft" class="btn btn-secondary me-2">
-                                <i class="bx bx-save"></i> Save as Draft
-                            </button>
-                            <button type="submit" name="action" value="publish" class="btn btn-success">
-                                <i class="bx bx-check-circle"></i> Create & Publish
-                            </button>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Job Code</label>
+                            <input type="text" class="form-control" value="<?= $job_code ?>" readonly>
+                            <small class="text-muted">Auto-generated</small>
+                        </div>
+                        
+                        <div class="col-md-8 mb-3">
+                            <label class="form-label">Client <span class="text-danger">*</span></label>
+                            <select name="client_code" class="form-select" required>
+                                <option value="">Select Client...</option>
+                                <?php foreach ($clients as $client): ?>
+                                    <option value="<?= $client['client_code'] ?>" 
+                                            <?= $preselected_client === $client['client_code'] ? 'selected' : '' ?>>
+                                        <?= escape($client['company_name']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        
+                        <div class="col-12 mb-3">
+                            <label class="form-label">Job Title <span class="text-danger">*</span></label>
+                            <input type="text" name="job_title" class="form-control" required 
+                                   placeholder="e.g., Senior PHP Developer">
+                        </div>
+                        
+                        <div class="col-12 mb-3">
+                            <label class="form-label">Job Description <span class="text-danger">*</span></label>
+                            <textarea name="description" class="form-control" rows="8" required 
+                                      placeholder="Describe the role, responsibilities, and requirements..."></textarea>
+                            <small class="text-muted">This will be visible on public job board when published</small>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Location</label>
+                            <input type="text" name="location" class="form-control" 
+                                   value="Remote" placeholder="e.g., Brussels, Remote, Hybrid">
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Number of Positions</label>
+                            <input type="number" name="positions_total" class="form-control" 
+                                   value="1" min="1" max="100">
                         </div>
                     </div>
-                </div>
+                    
+                    <!-- Salary Information -->
+                    <div class="row mb-4">
+                        <div class="col-12">
+                            <h6 class="text-primary">Salary Information</h6>
+                            <hr>
+                        </div>
+                        
+                        <div class="col-md-5 mb-3">
+                            <label class="form-label">Minimum Salary (EUR)</label>
+                            <input type="number" name="salary_min" class="form-control" 
+                                   step="0.01" placeholder="40000">
+                            <small class="text-muted">Annual salary in EUR</small>
+                        </div>
+                        
+                        <div class="col-md-5 mb-3">
+                            <label class="form-label">Maximum Salary (EUR)</label>
+                            <input type="number" name="salary_max" class="form-control" 
+                                   step="0.01" placeholder="60000">
+                            <small class="text-muted">Annual salary in EUR</small>
+                        </div>
+                        
+                        <div class="col-md-2 mb-3">
+                            <label class="form-label">&nbsp;</label>
+                            <div class="form-check form-switch">
+                                <input type="checkbox" name="show_salary" value="1" 
+                                       class="form-check-input" id="showSalaryCheck">
+                                <label class="form-check-label" for="showSalaryCheck">
+                                    Show on website
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Internal Management -->
+                    <div class="row mb-4">
+                        <div class="col-12">
+                            <h6 class="text-primary">Internal Management</h6>
+                            <hr>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Assign Recruiter</label>
+                            <select name="assigned_recruiter" class="form-select">
+                                <option value="">Unassigned</option>
+                                <?php foreach ($recruiters as $recruiter): ?>
+                                    <option value="<?= $recruiter['user_code'] ?>" 
+                                            <?= $recruiter['user_code'] === $user['user_code'] ? 'selected' : '' ?>>
+                                        <?= escape($recruiter['name']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <small class="text-muted">Primary recruiter handling this job</small>
+                        </div>
+                        
+                        <div class="col-12 mb-3">
+                            <label class="form-label">Internal Notes</label>
+                            <textarea name="notes" class="form-control" rows="4" 
+                                      placeholder="Add internal notes (not visible to public)..."></textarea>
+                        </div>
+                    </div>
+                    
+                    <!-- Submit Buttons -->
+                    <div class="pt-3 border-top">
+                        <button type="submit" name="action" value="save_draft" class="btn btn-secondary me-2">
+                            <i class="bx bx-save"></i> Save as Draft
+                        </button>
+                        <button type="submit" name="action" value="submit_approval" class="btn btn-primary">
+                            <i class="bx bx-check-circle"></i> Save & Submit for Approval
+                        </button>
+                        <a href="?action=list" class="btn btn-outline-secondary">Cancel</a>
+                    </div>
+                </form>
             </div>
-        </form>
+        </div>
+    </div>
+    
+    <!-- Help Panel -->
+    <div class="col-lg-4">
+        <div class="card bg-label-info mb-3">
+            <div class="card-body">
+                <h6><i class="bx bx-info-circle"></i> Quick Tips</h6>
+                <ul class="mb-0 small">
+                    <li class="mb-2">Job Code is auto-generated</li>
+                    <li class="mb-2">Description will be public when published</li>
+                    <li class="mb-2">Salary info is optional</li>
+                    <li class="mb-2">Save as draft to edit later</li>
+                    <li class="mb-2">Submit for approval to publish</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                <h6 class="mb-0">Workflow</h6>
+            </div>
+            <div class="card-body">
+                <ol class="small mb-0">
+                    <li class="mb-2">Create job (draft)</li>
+                    <li class="mb-2">Submit for approval</li>
+                    <li class="mb-2">Manager approves</li>
+                    <li class="mb-2">Job goes live</li>
+                    <li class="mb-2">Accept submissions</li>
+                    <li class="mb-2">Make placements</li>
+                </ol>
+            </div>
+        </div>
     </div>
 </div>
-
-<!-- TinyMCE Initialization -->
-<script src="https://cdn.tiny.cloud/1/no-api-key/tinymce/6/tinymce.min.js"></script>
-<script>
-tinymce.init({
-    selector: '#description',
-    height: 500,
-    menubar: false,
-    plugins: [
-        'lists', 'link', 'table', 'code', 'paste', 'searchreplace'
-    ],
-    toolbar: 'undo redo | formatselect | bold italic underline | ' +
-             'alignleft aligncenter alignright | bullist numlist | ' +
-             'link table | removeformat code',
-    paste_as_text: true,
-    content_style: 'body { font-family: Arial, sans-serif; font-size: 14px; }',
-    
-    // Clean pasted content from Word/email
-    paste_preprocess: function(plugin, args) {
-        args.content = args.content.replace(/<\/?span[^>]*>/g, "");
-        args.content = args.content.replace(/style="[^"]*"/g, "");
-    }
-});
-
-// Form validation
-document.getElementById('jobForm').addEventListener('submit', function(e) {
-    const title = document.querySelector('[name="job_title"]').value.trim();
-    const client = document.querySelector('[name="client_code"]').value;
-    const description = tinymce.get('description').getContent();
-    
-    if (!title) {
-        alert('Please enter a job title');
-        e.preventDefault();
-        return false;
-    }
-    
-    if (!client) {
-        alert('Please select a client');
-        e.preventDefault();
-        return false;
-    }
-    
-    if (description.length < 100) {
-        alert('Job description must be at least 100 characters');
-        e.preventDefault();
-        return false;
-    }
-});
-</script>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

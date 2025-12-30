@@ -1,535 +1,357 @@
 <?php
 /**
- * Jobs List Page
- * Shows all jobs with filters, search, statistics, and bulk actions
- * 
- * @version 5.0
+ * Jobs List Page with Tabs
+ * - All Jobs
+ * - My Jobs
+ * - Pending Approval (managers only)
+ * - Drafts
  */
-
-require_once __DIR__ . '/../_common.php';
+if (!defined('INCLUDED_FROM_INDEX')) {
+    require_once __DIR__ . '/../_common.php';
+}
 
 use ProConsultancy\Core\Permission;
 use ProConsultancy\Core\Database;
 use ProConsultancy\Core\Auth;
-use ProConsultancy\Core\CSRFToken;
-use ProConsultancy\Core\Pagination;
-
-// Check permission
-Permission::require('jobs', 'view');
 
 $user = Auth::user();
 $db = Database::getInstance();
 $conn = $db->getConnection();
 
-// Page configuration
+// Check permissions
+$canViewAll = Permission::can('jobs', 'view_all');
+$canViewOwn = Permission::can('jobs', 'view_own');
+$canApprove = Permission::can('jobs', 'approve');
+
+if (!$canViewAll && !$canViewOwn) {
+    header('Location: /panel/errors/403.php');
+    exit;
+}
+
+// Get tab
+$tab = input('tab', 'all');
+
+// Page config
 $pageTitle = 'Jobs';
 $breadcrumbs = [
+    ['title' => 'Dashboard', 'url' => '/panel/'],
     ['title' => 'Jobs', 'url' => '']
 ];
 
-// Get filters
-$filters = [
-    'search' => input('search', ''),
-    'status' => input('status', ''),
-    'client_code' => input('client_code', ''),
-    'assigned_to' => input('assigned_to', ''),
-    'approval_status' => input('approval_status', ''),
-    'tab' => input('tab', 'active') // active, draft, pending_approval, closed, all
-];
-
-// Build WHERE clause
+// Build WHERE based on tab
 $where = ['j.deleted_at IS NULL'];
 $params = [];
 $types = '';
 
-// Tab-based filtering
-switch ($filters['tab']) {
-    case 'active':
-        $where[] = "j.status = 'open' AND j.is_published = 1";
+switch ($tab) {
+    case 'my':
+        $where[] = "(j.created_by = ? OR j.assigned_recruiter = ?)";
+        $params[] = $user['user_code'];
+        $params[] = $user['user_code'];
+        $types .= 'ss';
+        $tabTitle = 'My Jobs';
         break;
-    case 'draft':
-        $where[] = "j.status = 'draft'";
-        break;
-    case 'pending_approval':
+        
+    case 'pending':
+        if (!$canApprove) {
+            header('Location: ?action=list&tab=all');
+            exit;
+        }
         $where[] = "j.approval_status = 'pending_approval'";
+        $tabTitle = 'Pending Approval';
         break;
+        
+    case 'drafts':
+        $where[] = "j.status = 'draft'";
+        if (!$canViewAll) {
+            $where[] = "j.created_by = ?";
+            $params[] = $user['user_code'];
+            $types .= 's';
+        }
+        $tabTitle = 'Drafts';
+        break;
+        
+    case 'open':
+        $where[] = "j.status IN ('open', 'filling')";
+        $tabTitle = 'Open Jobs';
+        break;
+        
     case 'closed':
-        $where[] = "j.status = 'closed'";
+        $where[] = "j.status IN ('filled', 'closed')";
+        $tabTitle = 'Closed Jobs';
         break;
-    // 'all' shows everything
+        
+    default: // 'all'
+        if (!$canViewAll) {
+            $where[] = "(j.created_by = ? OR j.assigned_recruiter = ?)";
+            $params[] = $user['user_code'];
+            $params[] = $user['user_code'];
+            $types .= 'ss';
+        }
+        $tabTitle = 'All Jobs';
+        break;
 }
 
-// Search filter
-if (!empty($filters['search'])) {
-    $where[] = "(j.job_title LIKE ? OR j.job_code LIKE ? OR j.job_refno LIKE ?)";
-    $searchTerm = '%' . $filters['search'] . '%';
-    $params = array_merge($params, [$searchTerm, $searchTerm, $searchTerm]);
-    $types .= 'sss';
-}
+$whereSQL = implode(' AND ', $where);
 
-// Additional filters
-if (!empty($filters['status'])) {
-    $where[] = "j.status = ?";
-    $params[] = $filters['status'];
-    $types .= 's';
-}
-
-if (!empty($filters['client_code'])) {
-    $where[] = "j.client_code = ?";
-    $params[] = $filters['client_code'];
-    $types .= 's';
-}
-
-if (!empty($filters['assigned_to'])) {
-    if ($filters['assigned_to'] === 'me') {
-        $where[] = "j.assigned_to = ?";
-        $params[] = Auth::userCode();
-        $types .= 's';
-    } elseif ($filters['assigned_to'] === 'unassigned') {
-        $where[] = "j.assigned_to IS NULL";
-    } else {
-        $where[] = "j.assigned_to = ?";
-        $params[] = $filters['assigned_to'];
-        $types .= 's';
-    }
-}
-
-if (!empty($filters['approval_status'])) {
-    $where[] = "j.approval_status = ?";
-    $params[] = $filters['approval_status'];
-    $types .= 's';
-}
-
-$whereClause = implode(' AND ', $where);
-
-// Get statistics
+// Get statistics for tabs
 $statsSQL = "
     SELECT 
         COUNT(*) as total,
-        SUM(CASE WHEN status = 'open' AND is_published = 1 THEN 1 ELSE 0 END) as active,
-        SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) as draft,
+        SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) as drafts,
+        SUM(CASE WHEN status IN ('open', 'filling') THEN 1 ELSE 0 END) as open_jobs,
         SUM(CASE WHEN approval_status = 'pending_approval' THEN 1 ELSE 0 END) as pending_approval,
-        SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closed
+        SUM(CASE WHEN created_by = '{$user['user_code']}' OR assigned_recruiter = '{$user['user_code']}' THEN 1 ELSE 0 END) as my_jobs,
+        SUM(CASE WHEN status IN ('filled', 'closed') THEN 1 ELSE 0 END) as closed
     FROM jobs j
     WHERE j.deleted_at IS NULL
 ";
-$statsResult = $conn->query($statsSQL);
-$stats = $statsResult->fetch_assoc();
 
-// Count filtered records
-$countSQL = "SELECT COUNT(*) as total FROM jobs j WHERE {$whereClause}";
-$countStmt = $conn->prepare($countSQL);
-if (!empty($params)) {
-    $countStmt->bind_param($types, ...$params);
+if (!$canViewAll) {
+    $statsSQL .= " AND (j.created_by = '{$user['user_code']}' OR j.assigned_recruiter = '{$user['user_code']}')";
 }
-$countStmt->execute();
-$totalRecords = $countStmt->get_result()->fetch_assoc()['total'];
+
+$stats = $conn->query($statsSQL)->fetch_assoc();
 
 // Pagination
-$page = (int)input('page', 1);
-$perPage = 25;
-$pagination = new Pagination($totalRecords, $perPage, $page);
+$page = max(1, (int)input('page', 1));
+$perPage = 20;
+$offset = ($page - 1) * $perPage;
+
+// Get total count
+$countSQL = "SELECT COUNT(*) as total FROM jobs j WHERE $whereSQL";
+$stmt = $conn->prepare($countSQL);
+if ($params) {
+    $stmt->bind_param($types, ...$params);
+}
+$stmt->execute();
+$totalCount = $stmt->get_result()->fetch_assoc()['total'];
+$totalPages = ceil($totalCount / $perPage);
 
 // Get jobs
 $sql = "
     SELECT 
         j.*,
         c.company_name,
-        u1.name as created_by_name,
-        u2.name as assigned_to_name,
-        u3.name as approved_by_name,
-        (SELECT COUNT(*) FROM applications a WHERE a.job_code = j.job_code) as applications_count
+        u_created.name as created_by_name,
+        u_assigned.name as assigned_recruiter_name
     FROM jobs j
     LEFT JOIN clients c ON j.client_code = c.client_code
-    LEFT JOIN users u1 ON j.created_by = u1.user_code
-    LEFT JOIN users u2 ON j.assigned_to = u2.user_code
-    LEFT JOIN users u3 ON j.approved_by = u3.user_code
-    WHERE {$whereClause}
+    LEFT JOIN users u_created ON j.created_by = u_created.user_code
+    LEFT JOIN users u_assigned ON j.assigned_recruiter = u_assigned.user_code
+    WHERE $whereSQL
     ORDER BY 
         CASE j.approval_status
             WHEN 'pending_approval' THEN 1
             ELSE 2
         END,
         j.created_at DESC
-    {$pagination->getLimitClause()}
+    LIMIT ? OFFSET ?
 ";
 
 $stmt = $conn->prepare($sql);
-if (!empty($params)) {
-    $stmt->bind_param($types, ...$params);
-}
+$limitParams = array_merge($params, [$perPage, $offset]);
+$limitTypes = $types . 'ii';
+$stmt->bind_param($limitTypes, ...$limitParams);
 $stmt->execute();
 $jobs = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-
-// Get clients for filter
-$clientsSQL = "SELECT client_code, company_name FROM clients WHERE is_active = 1 ORDER BY company_name";
-$clients = $conn->query($clientsSQL)->fetch_all(MYSQLI_ASSOC);
-
-// Get recruiters for filter
-$recruitersSQL = "SELECT user_code, name FROM users WHERE level IN ('recruiter', 'manager', 'admin') AND is_active = 1 ORDER BY name";
-$recruiters = $conn->query($recruitersSQL)->fetch_all(MYSQLI_ASSOC);
 
 require_once __DIR__ . '/../../includes/header.php';
 ?>
 
-<!-- Page Content -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="d-flex justify-content-between align-items-center">
-            <div>
-                <h4 class="fw-bold mb-1">
-                    <i class="bx bx-briefcase text-primary me-2"></i>
-                    Jobs
-                </h4>
-                <p class="text-muted mb-0">Manage job postings and recruitment</p>
-            </div>
-            <div>
-                <?php if (Permission::can('jobs', 'create')): ?>
-                <a href="create.php" class="btn btn-primary">
-                    <i class="bx bx-plus"></i> Create New Job
-                </a>
-                <?php endif; ?>
-            </div>
-        </div>
-    </div>
-</div>
+<style>
+.job-card {
+    transition: transform 0.2s, box-shadow 0.2s;
+    cursor: pointer;
+    border-left: 4px solid transparent;
+}
+.job-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+.job-card.draft { border-left-color: #6c757d; }
+.job-card.pending { border-left-color: #ffc107; }
+.job-card.open { border-left-color: #0dcaf0; }
+.job-card.filling { border-left-color: #0d6efd; }
+.job-card.filled { border-left-color: #198754; }
+.job-card.closed { border-left-color: #6c757d; }
+</style>
 
-<!-- Statistics Cards -->
-<div class="row g-3 mb-4">
-    <div class="col-md-6 col-lg-3">
-        <div class="card">
-            <div class="card-body">
-                <div class="d-flex align-items-start justify-content-between">
-                    <div>
-                        <small class="text-muted d-block">Active Jobs</small>
-                        <h3 class="mb-0"><?= number_format($stats['active']) ?></h3>
-                    </div>
-                    <div class="avatar flex-shrink-0">
-                        <span class="avatar-initial rounded bg-label-success">
-                            <i class="bx bx-check-circle"></i>
-                        </span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-md-6 col-lg-3">
-        <div class="card">
-            <div class="card-body">
-                <div class="d-flex align-items-start justify-content-between">
-                    <div>
-                        <small class="text-muted d-block">Drafts</small>
-                        <h3 class="mb-0"><?= number_format($stats['draft']) ?></h3>
-                    </div>
-                    <div class="avatar flex-shrink-0">
-                        <span class="avatar-initial rounded bg-label-secondary">
-                            <i class="bx bx-file"></i>
-                        </span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-md-6 col-lg-3">
-        <div class="card">
-            <div class="card-body">
-                <div class="d-flex align-items-start justify-content-between">
-                    <div>
-                        <small class="text-muted d-block">Pending Approval</small>
-                        <h3 class="mb-0 text-warning"><?= number_format($stats['pending_approval']) ?></h3>
-                    </div>
-                    <div class="avatar flex-shrink-0">
-                        <span class="avatar-initial rounded bg-label-warning">
-                            <i class="bx bx-time"></i>
-                        </span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-md-6 col-lg-3">
-        <div class="card">
-            <div class="card-body">
-                <div class="d-flex align-items-start justify-content-between">
-                    <div>
-                        <small class="text-muted d-block">Closed</small>
-                        <h3 class="mb-0"><?= number_format($stats['closed']) ?></h3>
-                    </div>
-                    <div class="avatar flex-shrink-0">
-                        <span class="avatar-initial rounded bg-label-dark">
-                            <i class="bx bx-x-circle"></i>
-                        </span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
+<!-- Tabs -->
+<ul class="nav nav-tabs mb-4">
+    <li class="nav-item">
+        <a class="nav-link <?= $tab === 'all' ? 'active' : '' ?>" href="?action=list&tab=all">
+            All Jobs <span class="badge bg-secondary"><?= $stats['total'] ?></span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $tab === 'my' ? 'active' : '' ?>" href="?action=list&tab=my">
+            My Jobs <span class="badge bg-primary"><?= $stats['my_jobs'] ?></span>
+        </a>
+    </li>
+    <?php if ($canApprove): ?>
+    <li class="nav-item">
+        <a class="nav-link <?= $tab === 'pending' ? 'active' : '' ?>" href="?action=list&tab=pending">
+            Pending Approval <span class="badge bg-warning"><?= $stats['pending_approval'] ?></span>
+        </a>
+    </li>
+    <?php endif; ?>
+    <li class="nav-item">
+        <a class="nav-link <?= $tab === 'drafts' ? 'active' : '' ?>" href="?action=list&tab=drafts">
+            Drafts <span class="badge bg-secondary"><?= $stats['drafts'] ?></span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $tab === 'open' ? 'active' : '' ?>" href="?action=list&tab=open">
+            Open <span class="badge bg-info"><?= $stats['open_jobs'] ?></span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $tab === 'closed' ? 'active' : '' ?>" href="?action=list&tab=closed">
+            Closed <span class="badge bg-secondary"><?= $stats['closed'] ?></span>
+        </a>
+    </li>
+</ul>
 
-<!-- Tabs & Filters -->
-<div class="card">
-    <div class="card-header">
-        <!-- Tabs -->
-        <ul class="nav nav-tabs card-header-tabs" role="tablist">
-            <li class="nav-item">
-                <a class="nav-link <?= $filters['tab'] === 'active' ? 'active' : '' ?>" 
-                   href="?tab=active">
-                    Active (<?= $stats['active'] ?>)
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link <?= $filters['tab'] === 'draft' ? 'active' : '' ?>" 
-                   href="?tab=draft">
-                    Drafts (<?= $stats['draft'] ?>)
-                </a>
-            </li>
-            <?php if (Permission::can('jobs', 'approve')): ?>
-            <li class="nav-item">
-                <a class="nav-link <?= $filters['tab'] === 'pending_approval' ? 'active' : '' ?>" 
-                   href="?tab=pending_approval">
-                    Pending Approval (<?= $stats['pending_approval'] ?>)
-                    <?php if ($stats['pending_approval'] > 0): ?>
-                        <span class="badge rounded-pill badge-center h-px-20 w-px-20 bg-danger ms-1">
-                            <?= $stats['pending_approval'] ?>
-                        </span>
-                    <?php endif; ?>
-                </a>
-            </li>
-            <?php endif; ?>
-            <li class="nav-item">
-                <a class="nav-link <?= $filters['tab'] === 'closed' ? 'active' : '' ?>" 
-                   href="?tab=closed">
-                    Closed (<?= $stats['closed'] ?>)
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link <?= $filters['tab'] === 'all' ? 'active' : '' ?>" 
-                   href="?tab=all">
-                    All Jobs (<?= $stats['total'] ?>)
-                </a>
-            </li>
-        </ul>
-    </div>
-    
-    <!-- Filters -->
-    <div class="card-body border-bottom">
-        <form method="GET" class="row g-3">
-            <input type="hidden" name="tab" value="<?= htmlspecialchars($filters['tab']) ?>">
-            
-            <div class="col-md-3">
-                <input type="text" class="form-control" name="search" 
-                       placeholder="Search jobs..." 
-                       value="<?= htmlspecialchars($filters['search']) ?>">
-            </div>
-            
-            <div class="col-md-2">
-                <select name="client_code" class="form-select">
-                    <option value="">All Clients</option>
-                    <?php foreach ($clients as $client): ?>
-                        <option value="<?= $client['client_code'] ?>" 
-                                <?= $filters['client_code'] === $client['client_code'] ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($client['company_name']) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            
-            <div class="col-md-2">
-                <select name="assigned_to" class="form-select">
-                    <option value="">All Recruiters</option>
-                    <option value="me" <?= $filters['assigned_to'] === 'me' ? 'selected' : '' ?>>
-                        My Jobs
-                    </option>
-                    <option value="unassigned" <?= $filters['assigned_to'] === 'unassigned' ? 'selected' : '' ?>>
-                        Unassigned
-                    </option>
-                    <?php foreach ($recruiters as $recruiter): ?>
-                        <option value="<?= $recruiter['user_code'] ?>" 
-                                <?= $filters['assigned_to'] === $recruiter['user_code'] ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($recruiter['name']) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            
-            <div class="col-md-3">
-                <div class="btn-group w-100">
-                    <button type="submit" class="btn btn-primary">
-                        <i class="bx bx-filter-alt"></i> Filter
-                    </button>
-                    <a href="?tab=<?= $filters['tab'] ?>" class="btn btn-outline-secondary">
-                        <i class="bx bx-x"></i> Clear
-                    </a>
-                </div>
-            </div>
-        </form>
-    </div>
-    
-    <!-- Jobs Table -->
-    <div class="table-responsive">
-        <table class="table table-hover">
-            <thead>
-                <tr>
-                    <th width="40">
-                        <input type="checkbox" class="form-check-input" id="selectAll">
-                    </th>
-                    <th>Job Title</th>
-                    <th>Client</th>
-                    <th>Status</th>
-                    <th>Assigned To</th>
-                    <th>Applications</th>
-                    <th>Created</th>
-                    <th width="120">Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php if (empty($jobs)): ?>
-                    <tr>
-                        <td colspan="8" class="text-center py-5">
-                            <i class="bx bx-briefcase" style="font-size: 48px; color: #ddd;"></i>
-                            <p class="text-muted mt-2">No jobs found</p>
-                        </td>
-                    </tr>
-                <?php else: ?>
-                    <?php foreach ($jobs as $job): ?>
-                        <tr>
-                            <td>
-                                <input type="checkbox" class="form-check-input select-job" 
-                                       value="<?= $job['job_code'] ?>">
-                            </td>
-                            <td>
-                                <a href="view.php?code=<?= urlencode($job['job_code']) ?>" 
-                                   class="fw-semibold text-dark">
-                                    <?= htmlspecialchars($job['job_title']) ?>
-                                </a>
-                                <?php if ($job['job_refno']): ?>
-                                    <br><small class="text-muted"><?= htmlspecialchars($job['job_refno']) ?></small>
-                                <?php endif; ?>
-                            </td>
-                            <td><?= htmlspecialchars($job['company_name'] ?? 'N/A') ?></td>
-                            <td>
-                                <?php
-                                $statusColors = [
-                                    'draft' => 'secondary',
-                                    'pending_approval' => 'warning',
-                                    'approved' => 'info',
-                                    'open' => 'success',
-                                    'closed' => 'dark',
-                                    'cancelled' => 'danger'
-                                ];
-                                $color = $statusColors[$job['status']] ?? 'secondary';
-                                ?>
-                                <span class="badge bg-<?= $color ?>">
-                                    <?= ucwords(str_replace('_', ' ', $job['status'])) ?>
-                                </span>
-                                
-                                <?php if ($job['approval_status'] === 'pending_approval'): ?>
-                                    <br><small class="text-warning">
-                                        <i class="bx bx-time"></i> Awaiting Approval
-                                    </small>
-                                <?php endif; ?>
-                            </td>
-                            <td>
-                                <?= htmlspecialchars($job['assigned_to_name'] ?? 'Unassigned') ?>
-                            </td>
-                            <td>
-                                <?= $job['applications_count'] ?>
-                            </td>
-                            <td>
-                                <small class="text-muted">
-                                    <?= date('M d, Y', strtotime($job['created_at'])) ?><br>
-                                    by <?= htmlspecialchars($job['created_by_name']) ?>
-                                </small>
-                            </td>
-                            <td>
-                                <div class="dropdown">
-                                    <button type="button" class="btn btn-sm btn-icon btn-text-secondary rounded-pill dropdown-toggle hide-arrow" 
-                                            data-bs-toggle="dropdown">
-                                        <i class="bx bx-dots-vertical-rounded"></i>
-                                    </button>
-                                    <div class="dropdown-menu dropdown-menu-end">
-                                        <a class="dropdown-item" href="view.php?code=<?= urlencode($job['job_code']) ?>">
-                                            <i class="bx bx-show me-2"></i> View
-                                        </a>
-                                        
-                                        <?php if (Permission::can('jobs', 'edit')): ?>
-                                            <a class="dropdown-item" href="edit.php?code=<?= urlencode($job['job_code']) ?>">
-                                                <i class="bx bx-edit me-2"></i> Edit
-                                            </a>
-                                        <?php endif; ?>
-                                        
-                                        <?php if ($job['approval_status'] === 'pending_approval' && Permission::can('jobs', 'approve')): ?>
-                                            <a class="dropdown-item text-warning" 
-                                               href="approve.php?code=<?= urlencode($job['job_code']) ?>">
-                                                <i class="bx bx-check-circle me-2"></i> Approve
-                                            </a>
-                                        <?php endif; ?>
-                                        
-                                        <?php if (Permission::can('jobs', 'delete')): ?>
-                                            <div class="dropdown-divider"></div>
-                                            <a class="dropdown-item text-danger" href="#" 
-                                               onclick="deleteJob('<?= htmlspecialchars($job['job_code']) ?>', '<?= htmlspecialchars($job['job_title']) ?>'); return false;">
-                                                <i class="bx bx-trash me-2"></i> Delete
-                                            </a>
-                                        <?php endif; ?>
-                                    </div>
-                                </div>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                <?php endif; ?>
-            </tbody>
-        </table>
-    </div>
-    
-    <!-- Pagination -->
-    <?php if ($totalRecords > $perPage): ?>
-        <div class="card-footer">
-            <?php echo $pagination->render(); ?>
-        </div>
+<!-- Header -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h4><?= $tabTitle ?></h4>
+    <?php if (Permission::can('jobs', 'create')): ?>
+        <a href="?action=create" class="btn btn-primary">
+            <i class="bx bx-plus"></i> Create New Job
+        </a>
     <?php endif; ?>
 </div>
 
-<script>
-// Select all checkbox
-document.getElementById('selectAll')?.addEventListener('change', function() {
-    document.querySelectorAll('.select-job').forEach(cb => {
-        cb.checked = this.checked;
-    });
-});
-
-// Delete job
-function deleteJob(jobCode, jobTitle) {
-    if (!confirm(`Are you sure you want to delete "${jobTitle}"?\n\nThis action cannot be undone.`)) {
-        return;
-    }
-    
-    fetch('handlers/delete.php', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            job_code: jobCode,
-            csrf_token: '<?= CSRFToken::generate() ?>'
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            location.reload();
-        } else {
-            alert('Error: ' + data.message);
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('Failed to delete job');
-    });
-}
-</script>
+<!-- Jobs List -->
+<div class="card">
+    <div class="card-body p-0">
+        <?php if (empty($jobs)): ?>
+            <div class="text-center py-5">
+                <i class="bx bx-briefcase display-1 text-muted"></i>
+                <p class="text-muted mt-3">No jobs found</p>
+                <?php if (Permission::can('jobs', 'create')): ?>
+                    <a href="?action=create" class="btn btn-primary mt-3">
+                        <i class="bx bx-plus"></i> Create First Job
+                    </a>
+                <?php endif; ?>
+            </div>
+        <?php else: ?>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Job Title</th>
+                            <th>Client</th>
+                            <th>Status</th>
+                            <th>Approval</th>
+                            <th>Positions</th>
+                            <th>Assigned To</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($jobs as $job): ?>
+                            <tr class="job-card <?= $job['status'] ?>" 
+                                onclick="window.location='?action=view&code=<?= escape($job['job_code']) ?>'">
+                                <td>
+                                    <strong><?= escape($job['job_title']) ?></strong><br>
+                                    <small class="text-muted">
+                                        <?= escape($job['job_code']) ?>
+                                        <?php if ($job['job_refno']): ?>
+                                            | Ref: <?= escape($job['job_refno']) ?>
+                                        <?php endif; ?>
+                                    </small>
+                                </td>
+                                <td>
+                                    <?= escape($job['company_name']) ?>
+                                </td>
+                                <td>
+                                    <?php
+                                    $statusBadge = [
+                                        'draft' => 'secondary',
+                                        'pending_approval' => 'warning',
+                                        'open' => 'info',
+                                        'filling' => 'primary',
+                                        'filled' => 'success',
+                                        'closed' => 'dark',
+                                        'cancelled' => 'danger'
+                                    ];
+                                    $badgeColor = $statusBadge[$job['status']] ?? 'secondary';
+                                    ?>
+                                    <span class="badge bg-<?= $badgeColor ?>">
+                                        <?= ucfirst(str_replace('_', ' ', $job['status'])) ?>
+                                    </span>
+                                    <?php if ($job['is_published']): ?>
+                                        <br><small class="text-success">Published</small>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php
+                                    $approvalBadge = [
+                                        'draft' => 'secondary',
+                                        'pending_approval' => 'warning',
+                                        'approved' => 'success',
+                                        'rejected' => 'danger'
+                                    ];
+                                    $appBadgeColor = $approvalBadge[$job['approval_status']] ?? 'secondary';
+                                    ?>
+                                    <span class="badge bg-<?= $appBadgeColor ?>">
+                                        <?= ucfirst(str_replace('_', ' ', $job['approval_status'])) ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <?= $job['positions_filled'] ?> / <?= $job['positions_total'] ?>
+                                    <br><small class="text-muted"><?= $job['total_submissions'] ?> submissions</small>
+                                </td>
+                                <td>
+                                    <small><?= escape($job['assigned_recruiter_name'] ?: 'Unassigned') ?></small>
+                                </td>
+                                <td onclick="event.stopPropagation()">
+                                    <a href="?action=view&code=<?= escape($job['job_code']) ?>" 
+                                       class="btn btn-sm btn-outline-primary" title="View">
+                                        <i class="bx bx-show"></i>
+                                    </a>
+                                    <?php if ($canApprove && $job['approval_status'] === 'pending_approval'): ?>
+                                        <a href="?action=approve&code=<?= escape($job['job_code']) ?>" 
+                                           class="btn btn-sm btn-warning" title="Review">
+                                            <i class="bx bx-check-circle"></i>
+                                        </a>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Pagination -->
+            <?php if ($totalPages > 1): ?>
+                <div class="card-footer">
+                    <nav>
+                        <ul class="pagination pagination-sm mb-0 justify-content-center">
+                            <li class="page-item <?= $page <= 1 ? 'disabled' : '' ?>">
+                                <a class="page-link" href="?action=list&tab=<?= $tab ?>&page=<?= $page - 1 ?>">Previous</a>
+                            </li>
+                            
+                            <?php for ($i = max(1, $page - 2); $i <= min($totalPages, $page + 2); $i++): ?>
+                                <li class="page-item <?= $i === $page ? 'active' : '' ?>">
+                                    <a class="page-link" href="?action=list&tab=<?= $tab ?>&page=<?= $i ?>"><?= $i ?></a>
+                                </li>
+                            <?php endfor; ?>
+                            
+                            <li class="page-item <?= $page >= $totalPages ? 'disabled' : '' ?>">
+                                <a class="page-link" href="?action=list&tab=<?= $tab ?>&page=<?= $page + 1 ?>">Next</a>
+                            </li>
+                        </ul>
+                    </nav>
+                    <p class="text-center text-muted small mt-2 mb-0">
+                        Showing <?= number_format($offset + 1) ?> to <?= number_format(min($offset + $perPage, $totalCount)) ?> of <?= number_format($totalCount) ?> jobs
+                    </p>
+                </div>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+</div>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

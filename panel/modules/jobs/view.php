@@ -1,491 +1,451 @@
 <?php
 /**
- * View Job Details
- * Shows complete job information with actions
- * 
- * @version 5.0
+ * Job Detail View
+ * Shows job info, submissions, and linked candidates
  */
-
-require_once __DIR__ . '/../_common.php';
+if (!defined('INCLUDED_FROM_INDEX')) {
+    require_once __DIR__ . '/../_common.php';
+}
 
 use ProConsultancy\Core\Permission;
 use ProConsultancy\Core\Database;
 use ProConsultancy\Core\Auth;
 use ProConsultancy\Core\CSRFToken;
 
-// Check permission
-Permission::require('jobs', 'view');
-
 $user = Auth::user();
 $db = Database::getInstance();
 $conn = $db->getConnection();
 
 // Get job code
-$jobCode = input('code');
-if (!$jobCode) {
-    redirectWithMessage('/panel/modules/jobs/list.php', 'Job not found', 'error');
+$job_code = input('code');
+if (!$job_code) {
+    redirectBack('Job not found');
+}
+
+// Check permission
+$canViewAll = Permission::can('jobs', 'view_all');
+$canViewOwn = Permission::can('jobs', 'view_own');
+
+if (!$canViewAll && !$canViewOwn) {
+    header('Location: /panel/errors/403.php');
+    exit;
 }
 
 // Get job details
-$stmt = $conn->prepare("
+$sql = "
     SELECT 
         j.*,
-        c.company_name, c.contact_person, c.contact_email, c.contact_phone,
-        u1.name as created_by_name,
-        u2.name as assigned_to_name,
-        u3.name as approved_by_name,
-        u4.name as rejected_by_name,
-        (SELECT COUNT(*) FROM applications a WHERE a.job_code = j.job_code) as applications_count,
-        (SELECT COUNT(*) FROM applications a WHERE a.job_code = j.job_code AND a.status = 'screening') as screening_count,
-        (SELECT COUNT(*) FROM applications a WHERE a.job_code = j.job_code AND a.status = 'interview') as interview_count,
-        (SELECT COUNT(*) FROM applications a WHERE a.job_code = j.job_code AND a.status = 'offer') as offer_count
+        c.company_name,
+        c.contact_person,
+        c.email as client_email,
+        c.phone as client_phone,
+        u_created.name as created_by_name,
+        u_assigned.name as assigned_recruiter_name,
+        u_approved.name as approved_by_name,
+        u_rejected.name as rejected_by_name
     FROM jobs j
     LEFT JOIN clients c ON j.client_code = c.client_code
-    LEFT JOIN users u1 ON j.created_by = u1.user_code
-    LEFT JOIN users u2 ON j.assigned_to = u2.user_code
-    LEFT JOIN users u3 ON j.approved_by = u3.user_code
-    LEFT JOIN users u4 ON j.rejected_by = u4.user_code
-    WHERE j.job_code = ? AND j.deleted_at IS NULL
-");
-$stmt->bind_param("s", $jobCode);
+    LEFT JOIN users u_created ON j.created_by = u_created.user_code
+    LEFT JOIN users u_assigned ON j.assigned_recruiter = u_assigned.user_code
+    LEFT JOIN users u_approved ON j.approved_by = u_approved.user_code
+    LEFT JOIN users u_rejected ON j.rejected_by = u_rejected.user_code
+    WHERE j.job_code = ?
+";
+
+$stmt = $conn->prepare($sql);
+$stmt->bind_param("s", $job_code);
 $stmt->execute();
 $job = $stmt->get_result()->fetch_assoc();
 
 if (!$job) {
-    redirectWithMessage('/panel/modules/jobs/list.php', 'Job not found', 'error');
+    redirectBack('Job not found');
 }
 
-// Get job notes
-$stmt = $conn->prepare("
-    SELECT n.*, u.name as created_by_name
-    FROM job_notes n
-    LEFT JOIN users u ON n.created_by = u.user_code
-    WHERE n.job_code = ?
-    ORDER BY n.created_at DESC
-");
-$stmt->bind_param("s", $jobCode);
-$stmt->execute();
-$notes = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+// Permission check for own jobs
+if (!$canViewAll && $canViewOwn) {
+    if ($job['created_by'] !== $user['user_code'] && $job['assigned_recruiter'] !== $user['user_code']) {
+        header('Location: /panel/errors/403.php');
+        exit;
+    }
+}
 
-// Page configuration
+// Get submissions for this job
+$submissionsSQL = "
+    SELECT 
+        s.*,
+        c.candidate_name,
+        c.email as candidate_email,
+        c.phone as candidate_phone,
+        c.current_position,
+        u.name as submitted_by_name
+    FROM submissions s
+    JOIN candidates c ON s.candidate_code = c.candidate_code
+    LEFT JOIN users u ON s.submitted_by = u.user_code
+    WHERE s.job_code = ?
+    ORDER BY s.created_at DESC
+";
+
+$stmt = $conn->prepare($submissionsSQL);
+$stmt->bind_param("s", $job_code);
+$stmt->execute();
+$submissions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+// Get placed candidates
+$placedCandidates = array_filter($submissions, fn($s) => $s['client_status'] === 'placed');
+
+// Page config
 $pageTitle = $job['job_title'];
 $breadcrumbs = [
-    ['title' => 'Jobs', 'url' => '/panel/modules/jobs/list.php'],
+    ['title' => 'Dashboard', 'url' => '/panel/'],
+    ['title' => 'Jobs', 'url' => '/panel/modules/jobs/?action=list'],
     ['title' => $job['job_title'], 'url' => '']
 ];
 
 require_once __DIR__ . '/../../includes/header.php';
 ?>
 
-<!-- Page Header -->
+<style>
+.info-card {
+    border-left: 4px solid #0d6efd;
+}
+.submission-row {
+    transition: background-color 0.2s;
+    cursor: pointer;
+}
+.submission-row:hover {
+    background-color: #f8f9fa;
+}
+</style>
+
+<!-- Header Section -->
 <div class="row mb-4">
     <div class="col-12">
-        <div class="d-flex justify-content-between align-items-start">
-            <div>
-                <h4 class="fw-bold mb-2"><?= htmlspecialchars($job['job_title']) ?></h4>
-                <div class="d-flex gap-2 flex-wrap align-items-center">
-                    <?php
-                    $statusColors = [
-                        'draft' => 'secondary',
-                        'pending_approval' => 'warning',
-                        'approved' => 'info',
-                        'open' => 'success',
-                        'closed' => 'dark'
-                    ];
-                    $color = $statusColors[$job['status']] ?? 'secondary';
-                    ?>
-                    <span class="badge bg-<?= $color ?>">
-                        <?= ucwords(str_replace('_', ' ', $job['status'])) ?>
-                    </span>
-                    
-                    <?php if ($job['is_published']): ?>
-                        <span class="badge bg-success">
-                            <i class="bx bx-globe"></i> Published
-                        </span>
-                    <?php endif; ?>
-                    
-                    <?php if ($job['approval_status'] === 'pending_approval'): ?>
-                        <span class="badge bg-warning">
-                            <i class="bx bx-time"></i> Awaiting Approval
-                        </span>
-                    <?php endif; ?>
-                    
-                    <span class="badge bg-label-secondary">
-                        <i class="bx bx-building"></i> <?= htmlspecialchars($job['company_name']) ?>
-                    </span>
-                    
-                    <span class="badge bg-label-info">
-                        <i class="bx bx-code-alt"></i> <?= htmlspecialchars($job['job_code']) ?>
-                    </span>
+        <div class="card info-card">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <h3 class="mb-2">
+                            <i class="bx bx-briefcase text-primary"></i>
+                            <?= escape($job['job_title']) ?>
+                        </h3>
+                        <p class="text-muted mb-0">
+                            <span class="badge bg-<?= $job['status'] === 'open' ? 'info' : 'secondary' ?> me-2">
+                                <?= ucfirst($job['status']) ?>
+                            </span>
+                            <span class="badge bg-<?= $job['approval_status'] === 'approved' ? 'success' : 'warning' ?> me-2">
+                                <?= ucfirst(str_replace('_', ' ', $job['approval_status'])) ?>
+                            </span>
+                            <?php if ($job['is_published']): ?>
+                                <span class="badge bg-success me-2">Published</span>
+                            <?php endif; ?>
+                            <strong>Code:</strong> <?= escape($job['job_code']) ?> |
+                            <?php if ($job['job_refno']): ?>
+                                <strong>Ref:</strong> <?= escape($job['job_refno']) ?> |
+                            <?php endif; ?>
+                            <strong>Company:</strong> <?= escape($job['company_name']) ?>
+                        </p>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <?php if (Permission::can('jobs', 'edit')): ?>
+                            <a href="?action=edit&code=<?= escape($job_code) ?>" class="btn btn-primary me-2">
+                                <i class="bx bx-edit"></i> Edit
+                            </a>
+                        <?php endif; ?>
+                        
+                        <?php if ($job['status'] === 'draft' && $job['approval_status'] === 'draft'): ?>
+                            <form method="POST" action="handlers/submit-for-approval.php" class="d-inline">
+                                <?= CSRFToken::field() ?>
+                                <input type="hidden" name="job_code" value="<?= escape($job_code) ?>">
+                                <button type="submit" class="btn btn-warning">
+                                    <i class="bx bx-check-circle"></i> Submit for Approval
+                                </button>
+                            </form>
+                        <?php endif; ?>
+                        
+                        <?php if ($job['approval_status'] === 'pending_approval' && Permission::can('jobs', 'approve')): ?>
+                            <a href="?action=approve&code=<?= escape($job_code) ?>" class="btn btn-warning">
+                                <i class="bx bx-check-circle"></i> Review & Approve
+                            </a>
+                        <?php endif; ?>
+                    </div>
                 </div>
-            </div>
-            
-            <div>
-                <a href="list.php" class="btn btn-sm btn-outline-secondary">
-                    <i class="bx bx-arrow-back"></i> Back to List
-                </a>
             </div>
         </div>
     </div>
 </div>
 
+<!-- Statistics Cards -->
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <div class="card">
+            <div class="card-body text-center">
+                <i class="bx bx-file display-4 text-info mb-2"></i>
+                <h3 class="mb-0"><?= $job['total_submissions'] ?></h3>
+                <small class="text-muted">Submissions</small>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card">
+            <div class="card-body text-center">
+                <i class="bx bx-user-voice display-4 text-primary mb-2"></i>
+                <h3 class="mb-0"><?= $job['total_interviews'] ?></h3>
+                <small class="text-muted">Interviews</small>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card">
+            <div class="card-body text-center">
+                <i class="bx bx-trophy display-4 text-success mb-2"></i>
+                <h3 class="mb-0"><?= $job['total_placements'] ?></h3>
+                <small class="text-muted">Placements</small>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card">
+            <div class="card-body text-center">
+                <i class="bx bx-target-lock display-4 text-warning mb-2"></i>
+                <h3 class="mb-0"><?= $job['positions_filled'] ?> / <?= $job['positions_total'] ?></h3>
+                <small class="text-muted">Positions</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Main Content -->
 <div class="row">
-    <!-- Left Column: Job Details -->
-    <div class="col-lg-8">
+    <!-- Left Column: Job Details & Submissions -->
+    <div class="col-md-8">
         <!-- Job Information -->
         <div class="card mb-4">
             <div class="card-header">
-                <h5 class="mb-0">Job Information</h5>
+                <h5 class="mb-0"><i class="bx bx-info-circle"></i> Job Information</h5>
             </div>
             <div class="card-body">
                 <div class="row mb-3">
                     <div class="col-md-6">
-                        <label class="form-label fw-semibold">Client</label>
-                        <p class="mb-0"><?= htmlspecialchars($job['company_name']) ?></p>
+                        <p class="mb-2"><strong>Location:</strong> <?= escape($job['location']) ?></p>
+                        <p class="mb-2"><strong>Positions:</strong> <?= $job['positions_total'] ?></p>
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label fw-semibold">Job Reference</label>
-                        <p class="mb-0"><?= htmlspecialchars($job['job_refno'] ?: 'N/A') ?></p>
+                        <?php if ($job['salary_min'] || $job['salary_max']): ?>
+                            <p class="mb-2">
+                                <strong>Salary:</strong> 
+                                €<?= number_format($job['salary_min'], 0) ?> - €<?= number_format($job['salary_max'], 0) ?>
+                                <?php if (!$job['show_salary']): ?>
+                                    <span class="badge bg-secondary">Not Public</span>
+                                <?php endif; ?>
+                            </p>
+                        <?php endif; ?>
+                        <p class="mb-2"><strong>Assigned to:</strong> <?= escape($job['assigned_recruiter_name'] ?: 'Unassigned') ?></p>
                     </div>
                 </div>
                 
-                <?php if ($job['location']): ?>
-                <div class="row mb-3">
-                    <div class="col-md-6">
-                        <label class="form-label fw-semibold">Location</label>
-                        <p class="mb-0">
-                            <i class="bx bx-map me-1"></i>
-                            <?= htmlspecialchars($job['location']) ?>
-                        </p>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label fw-semibold">Employment Type</label>
-                        <p class="mb-0"><?= ucfirst($job['employment_type'] ?? 'N/A') ?></p>
-                    </div>
-                </div>
-                <?php endif; ?>
+                <hr>
                 
-                <?php if ($job['salary_min'] || $job['salary_max']): ?>
-                <div class="row mb-3">
-                    <div class="col-md-6">
-                        <label class="form-label fw-semibold">Salary Range</label>
-                        <p class="mb-0">
-                            <?php if ($job['salary_min']): ?>
-                                €<?= number_format($job['salary_min'], 0) ?>
-                            <?php endif; ?>
-                            <?php if ($job['salary_min'] && $job['salary_max']): ?>
-                                -
-                            <?php endif; ?>
-                            <?php if ($job['salary_max']): ?>
-                                €<?= number_format($job['salary_max'], 0) ?>
-                            <?php endif; ?>
-                            <?php if ($job['salary_period']): ?>
-                                / <?= $job['salary_period'] ?>
-                            <?php endif; ?>
-                        </p>
-                    </div>
-                </div>
-                <?php endif; ?>
-                
-                <div class="row mb-3">
-                    <div class="col-md-6">
-                        <label class="form-label fw-semibold">Assigned To</label>
-                        <p class="mb-0">
-                            <i class="bx bx-user me-1"></i>
-                            <?= htmlspecialchars($job['assigned_to_name'] ?? 'Unassigned') ?>
-                        </p>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label fw-semibold">Created</label>
-                        <p class="mb-0">
-                            <?= date('M d, Y g:i A', strtotime($job['created_at'])) ?><br>
-                            <small class="text-muted">by <?= htmlspecialchars($job['created_by_name']) ?></small>
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Job Description -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5 class="mb-0">Job Description</h5>
-            </div>
-            <div class="card-body">
+                <h6>Description</h6>
                 <div class="job-description">
-                    <?= $job['description'] ?>
+                    <?= nl2br(escape($job['description'])) ?>
                 </div>
+                
+                <?php if ($job['notes']): ?>
+                    <hr>
+                    <h6>Internal Notes</h6>
+                    <div class="text-muted">
+                        <?= nl2br(escape($job['notes'])) ?>
+                    </div>
+                <?php endif; ?>
             </div>
         </div>
-        
-        <!-- Requirements (if exists) -->
-        <?php if (!empty($job['requirements'])): ?>
+
+        <!-- Submissions Table -->
         <div class="card mb-4">
-            <div class="card-header">
-                <h5 class="mb-0">Requirements</h5>
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="bx bx-user-check"></i> Submissions 
+                    <span class="badge bg-secondary"><?= count($submissions) ?></span>
+                </h5>
             </div>
-            <div class="card-body">
-                <div class="job-requirements">
-                    <?= $job['requirements'] ?>
-                </div>
+            <div class="card-body p-0">
+                <?php if (empty($submissions)): ?>
+                    <div class="text-center py-5">
+                        <i class="bx bx-user-x display-1 text-muted"></i>
+                        <p class="text-muted mt-3">No submissions yet</p>
+                    </div>
+                <?php else: ?>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Candidate</th>
+                                    <th>Status</th>
+                                    <th>Client Status</th>
+                                    <th>Submitted</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($submissions as $sub): ?>
+                                    <tr class="submission-row" onclick="window.location='../submissions/?action=view&code=<?= escape($sub['submission_code']) ?>'">
+                                        <td>
+                                            <strong><?= escape($sub['candidate_name']) ?></strong><br>
+                                            <small class="text-muted"><?= escape($sub['current_position'] ?: 'N/A') ?></small>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-<?= $sub['internal_status'] === 'approved' ? 'success' : 'warning' ?>">
+                                                <?= ucfirst($sub['internal_status']) ?>
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-<?= $sub['client_status'] === 'placed' ? 'success' : 'info' ?>">
+                                                <?= ucfirst(str_replace('_', ' ', $sub['client_status'])) ?>
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <small>
+                                                <?= date('M d, Y', strtotime($sub['created_at'])) ?><br>
+                                                by <?= escape($sub['submitted_by_name']) ?>
+                                            </small>
+                                        </td>
+                                        <td onclick="event.stopPropagation()">
+                                            <a href="../submissions/?action=view&code=<?= escape($sub['submission_code']) ?>" 
+                                               class="btn btn-sm btn-outline-primary">
+                                                <i class="bx bx-show"></i>
+                                            </a>
+                                            <a href="../candidates/?action=view&code=<?= escape($sub['candidate_code']) ?>" 
+                                               class="btn btn-sm btn-outline-secondary">
+                                                <i class="bx bx-user"></i>
+                                            </a>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
             </div>
         </div>
-        <?php endif; ?>
-        
-        <!-- Internal Notes (if any) -->
-        <?php if (!empty($notes)): ?>
+
+        <!-- Placed Candidates -->
+        <?php if (!empty($placedCandidates)): ?>
         <div class="card mb-4">
             <div class="card-header">
                 <h5 class="mb-0">
-                    <i class="bx bx-note text-warning me-2"></i>
-                    Internal Notes
+                    <i class="bx bx-trophy"></i> Placed Candidates 
+                    <span class="badge bg-success"><?= count($placedCandidates) ?></span>
                 </h5>
             </div>
             <div class="card-body">
-                <?php foreach ($notes as $note): ?>
-                    <div class="mb-3 p-3 border rounded">
-                        <div class="d-flex justify-content-between mb-2">
-                            <strong><?= htmlspecialchars($note['created_by_name']) ?></strong>
-                            <small class="text-muted">
-                                <?= date('M d, Y g:i A', strtotime($note['created_at'])) ?>
-                            </small>
+                <div class="row">
+                    <?php foreach ($placedCandidates as $placed): ?>
+                        <div class="col-md-6 mb-3">
+                            <div class="card border-success">
+                                <div class="card-body">
+                                    <h6 class="card-title">
+                                        <i class="bx bx-user-check text-success"></i>
+                                        <?= escape($placed['candidate_name']) ?>
+                                    </h6>
+                                    <p class="mb-2">
+                                        <small class="text-muted">
+                                            Placed on <?= date('M d, Y', strtotime($placed['placement_date'])) ?>
+                                        </small>
+                                    </p>
+                                    <div class="d-flex gap-2">
+                                        <a href="../candidates/?action=view&code=<?= escape($placed['candidate_code']) ?>" 
+                                           class="btn btn-sm btn-outline-primary">
+                                            <i class="bx bx-user"></i> View Candidate
+                                        </a>
+                                        <a href="../submissions/?action=view&code=<?= escape($placed['submission_code']) ?>" 
+                                           class="btn btn-sm btn-outline-secondary">
+                                            <i class="bx bx-show"></i> Submission
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                        <p class="mb-0"><?= nl2br(htmlspecialchars($note['note'])) ?></p>
-                    </div>
-                <?php endforeach; ?>
-            </div>
-        </div>
-        <?php endif; ?>
-        
-        <!-- Approval History -->
-        <?php if ($job['approval_status'] === 'approved' || $job['approval_status'] === 'rejected'): ?>
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5 class="mb-0">Approval History</h5>
-            </div>
-            <div class="card-body">
-                <?php if ($job['approval_status'] === 'approved'): ?>
-                    <div class="alert alert-success">
-                        <i class="bx bx-check-circle me-2"></i>
-                        <strong>Approved</strong> by <?= htmlspecialchars($job['approved_by_name']) ?>
-                        on <?= date('M d, Y g:i A', strtotime($job['approved_at'])) ?>
-                    </div>
-                <?php else: ?>
-                    <div class="alert alert-danger">
-                        <i class="bx bx-x-circle me-2"></i>
-                        <strong>Rejected</strong> by <?= htmlspecialchars($job['rejected_by_name']) ?>
-                        on <?= date('M d, Y g:i A', strtotime($job['rejected_at'])) ?>
-                        <br><br>
-                        <strong>Reason:</strong><br>
-                        <?= nl2br(htmlspecialchars($job['rejection_reason'])) ?>
-                    </div>
-                <?php endif; ?>
+                    <?php endforeach; ?>
+                </div>
             </div>
         </div>
         <?php endif; ?>
     </div>
-<ul class="nav nav-tabs">
-    <li><a href="#details">Details</a></li>
-    <li><a href="#submissions">Submissions (<?= $submissionCount ?>)</a></li>
-</ul>
 
-<div id="submissions">
-    <?php foreach ($submissions as $sub): ?>
-        <div class="submission-card">
-            <strong><?= $sub['candidate_name'] ?></strong>
-            <span class="badge"><?= $sub['client_status'] ?></span>
-            <a href="/panel/modules/submissions/view.php?code=<?= $sub['submission_code'] ?>">View</a>
+    <!-- Right Column: Client & Actions -->
+    <div class="col-md-4">
+        <!-- Client Information -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bx bx-building"></i> Client Information</h5>
+            </div>
+            <div class="card-body">
+                <h6><?= escape($job['company_name']) ?></h6>
+                <?php if ($job['contact_person']): ?>
+                    <p class="mb-1">
+                        <strong>Contact:</strong> <?= escape($job['contact_person']) ?>
+                    </p>
+                <?php endif; ?>
+                <?php if ($job['client_email']): ?>
+                    <p class="mb-1">
+                        <strong>Email:</strong> 
+                        <a href="mailto:<?= escape($job['client_email']) ?>"><?= escape($job['client_email']) ?></a>
+                    </p>
+                <?php endif; ?>
+                <?php if ($job['client_phone']): ?>
+                    <p class="mb-1">
+                        <strong>Phone:</strong> 
+                        <a href="tel:<?= escape($job['client_phone']) ?>"><?= escape($job['client_phone']) ?></a>
+                    </p>
+                <?php endif; ?>
+                <hr>
+                <a href="../clients/?action=view&code=<?= escape($job['client_code']) ?>" 
+                   class="btn btn-sm btn-outline-primary w-100">
+                    <i class="bx bx-link-external"></i> View Client Profile
+                </a>
+            </div>
         </div>
-    <?php endforeach; ?>
-</div>
-    <!-- Right Column: Actions & Statistics -->
-    <div class="col-lg-4">
+
         <!-- Quick Actions -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5 class="mb-0">Quick Actions</h5>
-            </div>
-            <div class="card-body">
-                <?php if (Permission::can('jobs', 'edit')): ?>
-                    <a href="edit.php?code=<?= urlencode($jobCode) ?>" class="btn btn-primary w-100 mb-2">
-                        <i class="bx bx-edit"></i> Edit Job
-                    </a>
-                <?php endif; ?>
-                
-                <?php if ($job['status'] === 'draft' && Permission::can('jobs', 'edit')): ?>
-                    <button type="button" class="btn btn-warning w-100 mb-2" id="submitApprovalBtn">
-                        <i class="bx bx-send"></i> Submit for Approval
-                    </button>
-                <?php endif; ?>
-                
-                <?php if ($job['approval_status'] === 'pending_approval' && Permission::can('jobs', 'approve')): ?>
-                    <a href="approve.php?code=<?= urlencode($jobCode) ?>" class="btn btn-success w-100 mb-2">
-                        <i class="bx bx-check-circle"></i> Review & Approve
-                    </a>
-                <?php endif; ?>
-                
-                <?php if ($job['status'] === 'open' && Permission::can('jobs', 'edit')): ?>
-                    <button type="button" class="btn btn-outline-secondary w-100 mb-2" id="closeJobBtn">
-                        <i class="bx bx-x-circle"></i> Close Job
-                    </button>
-                <?php endif; ?>
-                
-                <?php if (Permission::can('jobs', 'delete')): ?>
-                    <button type="button" class="btn btn-outline-danger w-100" id="deleteJobBtn">
-                        <i class="bx bx-trash"></i> Delete Job
-                    </button>
-                <?php endif; ?>
-            </div>
-        </div>
-        
-        <!-- Application Statistics -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5 class="mb-0">Applications</h5>
-            </div>
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <span>Total Applications</span>
-                    <span class="badge bg-primary badge-lg"><?= $job['applications_count'] ?></span>
-                </div>
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <span>In Screening</span>
-                    <span class="badge bg-info"><?= $job['screening_count'] ?></span>
-                </div>
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <span>In Interview</span>
-                    <span class="badge bg-warning"><?= $job['interview_count'] ?></span>
-                </div>
-                <div class="d-flex justify-content-between align-items-center">
-                    <span>Offer Stage</span>
-                    <span class="badge bg-success"><?= $job['offer_count'] ?></span>
-                </div>
-                
-                <?php if ($job['applications_count'] > 0): ?>
-                    <hr>
-                    <a href="/panel/modules/applications/list.php?job_code=<?= urlencode($jobCode) ?>" 
-                       class="btn btn-sm btn-outline-primary w-100">
-                        View All Applications
-                    </a>
-                <?php endif; ?>
-            </div>
-        </div>
-        
-        <!-- Job Link -->
-        <?php if ($job['is_published']): ?>
         <div class="card">
             <div class="card-header">
-                <h5 class="mb-0">Public Link</h5>
+                <h5 class="mb-0"><i class="bx bx-cog"></i> Actions</h5>
             </div>
             <div class="card-body">
-                <p class="mb-2">This job is published and visible to candidates:</p>
-                <div class="input-group">
-                    <input type="text" class="form-control" readonly 
-                           value="<?= BASE_URL ?>/public/job-detail.php?code=<?= urlencode($jobCode) ?>" 
-                           id="jobLink">
-                    <button class="btn btn-outline-primary" type="button" onclick="copyJobLink()">
-                        <i class="bx bx-copy"></i>
-                    </button>
+                <div class="d-grid gap-2">
+                    <?php if (Permission::can('jobs', 'edit')): ?>
+                        <a href="?action=edit&code=<?= escape($job_code) ?>" class="btn btn-primary">
+                            <i class="bx bx-edit"></i> Edit Job
+                        </a>
+                    <?php endif; ?>
+                    
+                    <?php if ($job['status'] === 'open'): ?>
+                        <form method="POST" action="handlers/close.php" onsubmit="return confirm('Close this job?')">
+                            <?= CSRFToken::field() ?>
+                            <input type="hidden" name="job_code" value="<?= escape($job_code) ?>">
+                            <button type="submit" class="btn btn-warning w-100">
+                                <i class="bx bx-x-circle"></i> Close Job
+                            </button>
+                        </form>
+                    <?php endif; ?>
+                    
+                    <?php if ($job['is_published']): ?>
+                        <a href="/public/job-detail.php?code=<?= escape($job['job_refno']) ?>" 
+                           class="btn btn-info" target="_blank">
+                            <i class="bx bx-link-external"></i> View Public Page
+                        </a>
+                    <?php endif; ?>
+                    
+                    <a href="?action=list" class="btn btn-outline-secondary">
+                        <i class="bx bx-arrow-back"></i> Back to List
+                    </a>
                 </div>
             </div>
         </div>
-        <?php endif; ?>
     </div>
 </div>
-
-<!-- Hidden data for JavaScript -->
-<div id="jobData" 
-     data-code="<?= htmlspecialchars($jobCode) ?>" 
-     data-title="<?= htmlspecialchars($job['job_title']) ?>"
-     style="display: none;"></div>
-
-<script>
-// Submit for approval
-document.getElementById('submitApprovalBtn')?.addEventListener('click', function() {
-    if (!confirm('Submit this job for approval?')) return;
-    
-    const jobCode = document.getElementById('jobData').dataset.code;
-    
-    fetch('handlers/submit-for-approval.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            job_code: jobCode,
-            csrf_token: '<?= CSRFToken::generate() ?>'
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            alert(data.message);
-            location.reload();
-        } else {
-            alert('Error: ' + data.message);
-        }
-    });
-});
-
-// Close job
-document.getElementById('closeJobBtn')?.addEventListener('click', function() {
-    const reason = prompt('Please enter a reason for closing this job:');
-    if (!reason) return;
-    
-    const jobCode = document.getElementById('jobData').dataset.code;
-    
-    fetch('handlers/close.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            job_code: jobCode,
-            close_reason: reason,
-            csrf_token: '<?= CSRFToken::generate() ?>'
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            alert(data.message);
-            location.reload();
-        } else {
-            alert('Error: ' + data.message);
-        }
-    });
-});
-
-// Delete job
-document.getElementById('deleteJobBtn')?.addEventListener('click', function() {
-    const jobData = document.getElementById('jobData');
-    const jobTitle = jobData.dataset.title;
-    
-    if (!confirm(`Are you sure you want to delete "${jobTitle}"?\n\nThis action cannot be undone.`)) {
-        return;
-    }
-    
-    fetch('handlers/delete.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            job_code: jobData.dataset.code,
-            csrf_token: '<?= CSRFToken::generate() ?>'
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            window.location.href = 'list.php';
-        } else {
-            alert('Error: ' + data.message);
-        }
-    });
-});
-
-// Copy job link
-function copyJobLink() {
-    const input = document.getElementById('jobLink');
-    input.select();
-    document.execCommand('copy');
-    alert('Link copied to clipboard!');
-}
-</script>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

@@ -23,8 +23,8 @@ class Database {
      * Private constructor - Singleton pattern
      */
     private function __construct() {
-        $this->config = require __DIR__ . '/../../config/database.php';
-        $appConfig = require __DIR__ . '/../../config/app.php';
+        $this->config = require __DIR__ . '/../config/database.php';
+        $appConfig = require __DIR__ . '/../config/app.php';
         $this->debugMode = $appConfig['app_debug'] ?? false;
         $this->logger = Logger::getInstance();
         $this->connect();

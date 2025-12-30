@@ -1,12 +1,10 @@
 -- ============================================================================
--- PROCONSULTANCY ATS - FINAL PRODUCTION SCHEMA
--- Version: 3.0 PRODUCTION READY
--- Date: December 30, 2024
--- Author: Based on actual requirements
+-- PROCONSULTANCY ATS - FIAL PRODUCTION SCHEMA
+
 -- ============================================================================
 --
 -- KEY FEATURES:
--- - Simplified submissions (NO payment/rate fields)
+-- - Simplified submissions 
 -- - Dual-status workflow (internal approval + client phases)
 -- - Auto-update triggers for candidate/job status
 -- - Complete permission system with defaults
@@ -14,7 +12,7 @@
 -- - Status history tracking
 --
 -- INSTALLATION:
--- mysql -u root -p proconsultancy < schema_v3_production.sql
+-- mysql -u root -p proconsultancy < schema.sql
 --
 -- ============================================================================
 
@@ -372,53 +370,89 @@ COMMENT='Client companies info';
 -- Jobs
 CREATE TABLE `jobs` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    `job_code` VARCHAR(50) UNIQUE NOT NULL,
+    `job_code` VARCHAR(50) UNIQUE NOT NULL COMMENT 'Internal code (e.g., JOB20241230001)',
+    `job_refno` VARCHAR(50) UNIQUE NULL COMMENT 'Public reference number for publishing',
     `client_code` VARCHAR(50) NOT NULL,
+    
+    -- Basic Information
     `job_title` VARCHAR(255) NOT NULL,
-    `description` TEXT,
-    `requirements` TEXT,
+    `description` TEXT COMMENT 'Rich text job description',
+    `notes` TEXT COMMENT 'Internal notes (not public)',
     
-    -- Basic details
-    `location` VARCHAR(255),
-    `employment_type` ENUM('permanent', 'contract', 'temporary') DEFAULT 'permanent',
+    -- Job Details
+    `location` VARCHAR(255) DEFAULT 'Belgium',
     
-    -- Status
+    -- Salary Information (Simplified)
+    `salary_min` DECIMAL(12,2) NULL COMMENT 'Minimum salary',
+    `salary_max` DECIMAL(12,2) NULL COMMENT 'Maximum salary',
+    `show_salary` BOOLEAN DEFAULT 0 COMMENT 'Display salary on public posting',
+    
+    -- Status & Workflow
     `status` ENUM(
-        'draft',        -- Being created
-        'open',         -- Accepting submissions
-        'filling',      -- Has active submissions
-        'filled',       -- All positions filled
-        'closed'        -- No longer active
+        'draft',              -- Being created
+        'pending_approval',   -- Waiting for approval
+        'open',              -- Accepting submissions
+        'filling',           -- Has active submissions
+        'filled',            -- All positions filled
+        'closed',            -- No longer active
+        'cancelled'          -- Cancelled
     ) DEFAULT 'draft',
     
-    -- Capacity
-    `positions_total` INT DEFAULT 1,
-    `positions_filled` INT DEFAULT 0,
+    -- Approval Workflow
+    `approval_status` ENUM('draft', 'pending_approval', 'approved', 'rejected') DEFAULT 'draft',
+    `submitted_for_approval_at` TIMESTAMP NULL,
+    `approved_by` VARCHAR(50) NULL,
+    `approved_at` TIMESTAMP NULL,
+    `rejected_by` VARCHAR(50) NULL,
+    `rejected_at` TIMESTAMP NULL,
+    `rejection_reason` TEXT NULL,
+    
+    -- Capacity Management
+    `positions_total` INT DEFAULT 1 COMMENT 'Total positions to fill',
+    `positions_filled` INT DEFAULT 0 COMMENT 'Positions filled (auto-updated)',
     
     -- Publishing
-    `is_published` BOOLEAN DEFAULT 0,
+    `is_published` BOOLEAN DEFAULT 0 COMMENT 'Visible on public job board',
     `published_at` TIMESTAMP NULL,
     
-    -- Activity counters (auto-updated)
+    -- Activity Counters (Auto-updated by triggers)
     `total_submissions` INT DEFAULT 0,
     `total_interviews` INT DEFAULT 0,
     `total_placements` INT DEFAULT 0,
     
-    `created_by` VARCHAR(50),
+    -- Assignment
+    `assigned_recruiter` VARCHAR(50) NULL COMMENT 'Primary recruiter handling this job',
+    
+    -- Metadata
+    `created_by` VARCHAR(50) NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     `deleted_at` TIMESTAMP NULL,
+    `closed_at` TIMESTAMP NULL,
+    `closed_by` VARCHAR(50) NULL,
     
+    -- Foreign Keys
     FOREIGN KEY (`client_code`) REFERENCES `clients`(`client_code`) ON DELETE RESTRICT,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`user_code`) ON DELETE RESTRICT,
+    FOREIGN KEY (`assigned_recruiter`) REFERENCES `users`(`user_code`) ON DELETE SET NULL,
+    FOREIGN KEY (`approved_by`) REFERENCES `users`(`user_code`) ON DELETE SET NULL,
+    FOREIGN KEY (`rejected_by`) REFERENCES `users`(`user_code`) ON DELETE SET NULL,
+    
+    -- Indexes
     INDEX `idx_code` (`job_code`),
+    INDEX `idx_refno` (`job_refno`),
     INDEX `idx_client` (`client_code`),
     INDEX `idx_status` (`status`),
-    INDEX `idx_published` (`is_published`)
+    INDEX `idx_approval_status` (`approval_status`),
+    INDEX `idx_published` (`is_published`),
+    INDEX `idx_assigned` (`assigned_recruiter`)
+    
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='Job openings';
 
+
 -- ============================================================================
--- SECTION 3: SUBMISSIONS (Simplified - NO payment/rate fields)
+-- SECTION 3: SUBMISSIONS
 -- ============================================================================
 
 CREATE TABLE `submissions` (

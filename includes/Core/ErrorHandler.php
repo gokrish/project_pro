@@ -21,7 +21,7 @@ class ErrorHandler {
             return;
         }
         
-        self::$config = require __DIR__ . '/../../config/app.php';
+        self::$config = require __DIR__ . '/../config/app.php';
         
         // Set error reporting
         if (self::$config['app_debug']) {
