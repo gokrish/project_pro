@@ -1,134 +1,108 @@
 <?php
 /**
- * Client Update Handler
- * File: panel/modules/clients/handlers/update.php
+ * Update Client Handler
  */
-
 require_once __DIR__ . '/../../_common.php';
 
-header('Content-Type: application/json');
+use ProConsultancy\Core\Permission;
+use ProConsultancy\Core\Database;
+use ProConsultancy\Core\Auth;
+use ProConsultancy\Core\CSRFToken;
+use ProConsultancy\Core\Logger;
 
-if (!Auth::check()) {
-    echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-    exit;
+Permission::require('clients', 'edit');
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    redirectBack('Invalid request method');
 }
 
-if (!Permission::can('clients', 'edit')) {
-    echo json_encode(['success' => false, 'message' => 'No permission']);
-    exit;
-}
-
-if (!CSRFToken::verify($_POST['csrf_token'] ?? '')) {
-    echo json_encode(['success' => false, 'message' => 'Invalid token']);
-    exit;
+if (!CSRFToken::verifyRequest()) {
+    redirectBack('Invalid security token');
 }
 
 try {
-    $db = Database::getInstance();
-    $conn = $db->getConnection();
+    $client_code = input('client_code');
+    $company_name = input('company_name');
+    $contact_person = input('contact_person', '');
+    $email = input('email', '');
+    $phone = input('phone', '');
+    $status = input('status', 'active');
+    $account_manager = input('account_manager', '');
+    $notes = input('notes', '');
+    
     $user = Auth::user();
     
-    $clientCode = trim($_POST['client_code'] ?? '');
-    
-    if (empty($clientCode)) {
-        throw new Exception('Client code is required');
+    // Validation
+    if (empty($client_code) || empty($company_name)) {
+        throw new Exception('Client code and company name are required');
     }
     
-    // Verify client exists
-    $stmt = $conn->prepare("SELECT client_id FROM clients WHERE client_code = ?");
-    $stmt->bind_param('s', $clientCode);
-    $stmt->execute();
-    $result = $stmt->get_result();
+    if (!in_array($status, ['active', 'inactive'])) {
+        throw new Exception('Invalid status');
+    }
     
-    if ($result->num_rows === 0) {
+    $db = Database::getInstance();
+    $conn = $db->getConnection();
+    
+    // Check client exists
+    $stmt = $conn->prepare("SELECT * FROM clients WHERE client_code = ?");
+    $stmt->bind_param("s", $client_code);
+    $stmt->execute();
+    $oldClient = $stmt->get_result()->fetch_assoc();
+    
+    if (!$oldClient) {
         throw new Exception('Client not found');
     }
     
-    // Validate fields
-    $companyName = trim($_POST['company_name'] ?? '');
-    $clientName = trim($_POST['client_name'] ?? '');
-    $email = trim($_POST['email'] ?? '');
-    $accountManager = trim($_POST['account_manager'] ?? '');
-    
-    if (empty($companyName) || empty($clientName) || empty($email) || empty($accountManager)) {
-        throw new Exception('Required fields are missing');
-    }
-    
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        throw new Exception('Invalid email format');
-    }
-    
-    // Check email uniqueness (excluding current client)
-    $stmt = $conn->prepare("SELECT client_id FROM clients WHERE email = ? AND client_code != ?");
-    $stmt->bind_param('ss', $email, $clientCode);
-    $stmt->execute();
-    if ($stmt->get_result()->num_rows > 0) {
-        throw new Exception('Another client with this email already exists');
-    }
-    
-    // Optional fields
-    $industry = trim($_POST['industry'] ?? '');
-    $contactPerson = trim($_POST['contact_person'] ?? '');
-    $phone = trim($_POST['phone'] ?? '');
-    $address = trim($_POST['address'] ?? '');
-    $city = trim($_POST['city'] ?? '');
-    $country = trim($_POST['country'] ?? 'Belgium');
-    $notes = trim($_POST['notes'] ?? '');
-    $status = $_POST['status'] ?? 'active';
-    
     // Update client
-    $sql = "
-        UPDATE clients SET
-            company_name = ?,
-            industry = ?,
-            client_name = ?,
+    $stmt = $conn->prepare("
+        UPDATE clients
+        SET company_name = ?,
             contact_person = ?,
             email = ?,
             phone = ?,
-            address = ?,
-            city = ?,
-            country = ?,
-            notes = ?,
             status = ?,
             account_manager = ?,
+            notes = ?,
             updated_at = NOW()
         WHERE client_code = ?
-    ";
+    ");
     
-    $stmt = $conn->prepare($sql);
-    $stmt->bind_param(
-        'sssssssssssss',
-        $companyName, $industry,
-        $clientName, $contactPerson, $email, $phone,
-        $address, $city, $country,
-        $notes, $status, $accountManager,
-        $clientCode
+    $stmt->bind_param("ssssssss",
+        $company_name, $contact_person, $email, $phone,
+        $status, $account_manager, $notes, $client_code
     );
     
     if (!$stmt->execute()) {
-        throw new Exception('Failed to update client: ' . $stmt->error);
+        throw new Exception('Failed to update client: ' . $conn->error);
     }
     
     // Log activity
-    if (class_exists('Logger')) {
-        Logger::getInstance()->logActivity(
-            'update',
-            'clients',
-            $clientCode,
-            "Updated client: {$companyName}"
-        );
-    }
+    $changes = [];
+    if ($oldClient['company_name'] !== $company_name) $changes['company_name'] = ['from' => $oldClient['company_name'], 'to' => $company_name];
+    if ($oldClient['status'] !== $status) $changes['status'] = ['from' => $oldClient['status'], 'to' => $status];
+    if ($oldClient['account_manager'] !== $account_manager) $changes['account_manager'] = ['from' => $oldClient['account_manager'], 'to' => $account_manager];
     
-    echo json_encode([
-        'success' => true,
-        'message' => 'Client updated successfully',
-        'client_code' => $clientCode
-    ]);
+    Logger::getInstance()->logActivity(
+        'update',
+        'clients',
+        $client_code,
+        "Client updated: {$company_name}",
+        ['changes' => $changes, 'updated_by' => $user['user_code']]
+    );
+    
+    redirectWithMessage(
+        "/panel/modules/clients/?action=view&code={$client_code}",
+        'Client updated successfully',
+        'success'
+    );
     
 } catch (Exception $e) {
-    error_log('Client update error: ' . $e->getMessage());
-    echo json_encode([
-        'success' => false,
-        'message' => $e->getMessage()
+    Logger::getInstance()->error('Client update failed', [
+        'error' => $e->getMessage(),
+        'client_code' => $client_code ?? null,
+        'user' => $user['user_code'] ?? null
     ]);
+    
+    redirectBack('Failed to update client: ' . $e->getMessage());
 }

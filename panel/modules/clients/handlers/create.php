@@ -5,7 +5,10 @@
  */
 
 require_once __DIR__ . '/../../_common.php';
-
+use ProConsultancy\Core\Permission;
+use ProConsultancy\Core\Database;
+use ProConsultancy\Core\Auth;
+use ProConsultancy\Core\CSRFToken;
 header('Content-Type: application/json');
 
 // Check authentication

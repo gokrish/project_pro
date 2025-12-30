@@ -1,48 +1,48 @@
 <?php
 /**
- * Approve Submission Handler
- * File: panel/modules/submissions/handlers/approve.php
+ * Approve/Reject Submission Handler
+ * Manager approves or rejects submission
  */
-
 require_once __DIR__ . '/../../_common.php';
 
-
+use ProConsultancy\Core\Permission;
 use ProConsultancy\Core\Database;
 use ProConsultancy\Core\Auth;
+use ProConsultancy\Core\CSRFToken;
 use ProConsultancy\Core\Logger;
 
-header('Content-Type: application/json');
+Permission::require('submissions', 'approve');
 
-if (!Auth::check()) {
-    echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-    exit;
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    redirectBack('Invalid request method');
 }
 
-// Only managers and admins can approve
-$user = Auth::user();
-if (!in_array($user['level'], ['admin', 'manager'])) {
-    echo json_encode(['success' => false, 'message' => 'Insufficient permissions']);
-    exit;
+if (!CSRFToken::verifyRequest()) {
+    redirectBack('Invalid request token');
 }
 
 try {
+    $submission_code = input('submission_code');
+    $action = input('action'); // 'approve' or 'reject'
+    $notes = input('approval_notes', '');
+    
+    if (!in_array($action, ['approve', 'reject'])) {
+        throw new Exception('Invalid action');
+    }
+    
     $db = Database::getInstance();
     $conn = $db->getConnection();
-    
-    $input = json_decode(file_get_contents('php://input'), true);
-    $submissionCode = $input['submission_code'] ?? '';
-    $notes = $input['notes'] ?? '';
-    
-    if (empty($submissionCode)) {
-        throw new Exception('Submission code is required');
-    }
+    $user = Auth::user();
     
     // Get submission
     $stmt = $conn->prepare("
-        SELECT * FROM candidate_submissions 
-        WHERE submission_code = ? AND deleted_at IS NULL
+        SELECT s.*, c.candidate_name, j.job_title
+        FROM submissions s
+        JOIN candidates c ON s.candidate_code = c.candidate_code
+        JOIN jobs j ON s.job_code = j.job_code
+        WHERE s.submission_code = ?
     ");
-    $stmt->bind_param('s', $submissionCode);
+    $stmt->bind_param("s", $submission_code);
     $stmt->execute();
     $submission = $stmt->get_result()->fetch_assoc();
     
@@ -50,64 +50,69 @@ try {
         throw new Exception('Submission not found');
     }
     
-    if ($submission['status'] !== 'pending_review') {
-        throw new Exception('Only pending submissions can be approved');
-    }
-    
-    // Update submission
-    $stmt = $conn->prepare("
-        UPDATE candidate_submissions 
-        SET 
-            status = 'approved',
-            reviewed_by = ?,
-            reviewed_at = NOW(),
-            review_notes = ?,
-            submitted_to_client_at = NOW(),
-            client_notified = 1,
-            updated_at = NOW()
-        WHERE submission_code = ?
-    ");
-    $stmt->bind_param('sss', $user['user_code'], $notes, $submissionCode);
-    
-    if (!$stmt->execute()) {
-        throw new Exception('Failed to approve submission');
-    }
-    
-    // Add note
-    $noteText = 'Submission approved by ' . $user['name'];
-    if (!empty($notes)) {
-        $noteText .= "\nNotes: " . $notes;
-    }
-    
-    $stmt = $conn->prepare("
-        INSERT INTO submission_notes (submission_code, note, note_type, created_by, created_at)
-        VALUES (?, ?, 'internal', ?, NOW())
-    ");
-    $stmt->bind_param('sss', $submissionCode, $noteText, $user['user_code']);
-    $stmt->execute();
-    
-    // TODO: Send email notification to client
-    // TODO: Notify recruiter who created submission
-    
-    // Log activity
-    if (class_exists('Logger')) {
-        Logger::getInstance()->logActivity(
-            'approve',
-            'submissions',
-            $submissionCode,
-            "Approved submission by {$user['name']}"
+    if ($submission['internal_status'] !== 'pending') {
+        throw new Exception(
+            'This submission has already been ' . $submission['internal_status']
         );
     }
     
-    echo json_encode([
-        'success' => true,
-        'message' => 'Submission approved and sent to client'
-    ]);
+    // Update submission
+    if ($action === 'approve') {
+        $stmt = $conn->prepare("
+            UPDATE submissions
+            SET internal_status = 'approved',
+                approved_by = ?,
+                approved_at = NOW(),
+                approval_notes = ?
+            WHERE submission_code = ?
+        ");
+        $stmt->bind_param("sss", $user['user_code'], $notes, $submission_code);
+        $stmt->execute();
+        
+        $message = "Submission approved successfully";
+        $log_message = "Approved by {$user['name']}";
+        
+    } else {
+        $stmt = $conn->prepare("
+            UPDATE submissions
+            SET internal_status = 'rejected',
+                approved_by = ?,
+                approved_at = NOW(),
+                rejection_reason = ?
+            WHERE submission_code = ?
+        ");
+        $stmt->bind_param("sss", $user['user_code'], $notes, $submission_code);
+        $stmt->execute();
+        
+        $message = "Submission rejected";
+        $log_message = "Rejected by {$user['name']}";
+    }
+    
+    // Log activity
+    Logger::getInstance()->logActivity(
+        $action,
+        'submissions',
+        $submission_code,
+        "{$log_message}: {$submission['candidate_name']} → {$submission['job_title']}",
+        [
+            'approved_by' => $user['user_code'],
+            'notes' => $notes
+        ]
+    );
+    
+    // TODO: Notify recruiter
+    
+    redirectWithMessage(
+        "/panel/modules/submissions/view.php?code={$submission_code}",
+        $message,
+        'success'
+    );
     
 } catch (Exception $e) {
-    error_log('Submission approval error: ' . $e->getMessage());
-    echo json_encode([
-        'success' => false,
-        'message' => $e->getMessage()
+    Logger::getInstance()->error('Submission approval failed', [
+        'error' => $e->getMessage(),
+        'submission' => $submission_code ?? null
     ]);
+    
+    redirectBack('Action failed: ' . $e->getMessage());
 }

@@ -1,529 +1,609 @@
 <?php
 /**
- * View Submission Details
- * File: panel/modules/submissions/view.php
+ * Submission Detail View
+ * Shows complete submission details with timeline and actions
  */
+require_once __DIR__ . '/../_common.php';
 
-if (!defined('INCLUDED_FROM_INDEX')) {
-    define('INCLUDED_FROM_INDEX', true);
-}
 use ProConsultancy\Core\Permission;
 use ProConsultancy\Core\Database;
 use ProConsultancy\Core\Auth;
-use ProConsultancy\Core\CSRFToken;
 
+$user = Auth::user();
 $db = Database::getInstance();
 $conn = $db->getConnection();
-$user = Auth::user();
 
-// Get submission
-$submissionCode = input('code', '');
-$submissionId = (int)input('id', 0);
-
-if (empty($submissionCode) && !$submissionId) {
-    throw new Exception('Submission code or ID required');
+// Get submission code
+$submission_code = input('code');
+if (!$submission_code) {
+    redirectBack('Submission not found');
 }
 
-$query = "
+// Check permission
+$canViewAll = Permission::can('submissions', 'view_all');
+$canViewOwn = Permission::can('submissions', 'view_own');
+
+if (!$canViewAll && !$canViewOwn) {
+    header('Location: /panel/errors/403.php');
+    exit;
+}
+
+// Get submission with all related data
+$sql = "
     SELECT 
         s.*,
-        c.candidate_name, c.email as candidate_email, c.phone as candidate_phone,
-        c.current_position, c.experience_years, c.current_location,
-        j.title as job_title, j.job_code,
-        cl.company_name as client_name, cl.client_name as client_contact, cl.email as client_email,
-        submitter.name as submitted_by_name,
-        reviewer.name as reviewed_by_name
-    FROM candidate_submissions s
-    LEFT JOIN candidates c ON s.candidate_code = c.candidate_code
-    LEFT JOIN jobs j ON s.job_code = j.job_code
-    LEFT JOIN clients cl ON s.client_code = cl.client_code
-    LEFT JOIN users submitter ON s.submitted_by = submitter.user_code
-    LEFT JOIN users reviewer ON s.reviewed_by = reviewer.user_code
-    WHERE " . ($submissionCode ? "s.submission_code = ?" : "s.submission_id = ?") . "
-    AND s.deleted_at IS NULL
+        c.candidate_name,
+        c.email as candidate_email,
+        c.phone as candidate_phone,
+        c.current_location,
+        c.current_position,
+        c.current_company,
+        c.skills,
+        c.total_experience,
+        c.linkedin_url,
+        c.resume_path,
+        j.job_title,
+        j.job_code,
+        j.description as job_description,
+        j.location as job_location,
+        j.employment_type,
+        j.client_code,
+        cl.company_name,
+        cl.contact_person,
+        cl.email as client_email,
+        cl.phone as client_phone,
+        u_submitted.name as submitted_by_name,
+        u_submitted.email as submitted_by_email,
+        u_approved.name as approved_by_name,
+        u_sent.name as sent_by_name
+    FROM submissions s
+    JOIN candidates c ON s.candidate_code = c.candidate_code
+    JOIN jobs j ON s.job_code = j.job_code
+    JOIN clients cl ON j.client_code = cl.client_code
+    LEFT JOIN users u_submitted ON s.submitted_by = u_submitted.user_code
+    LEFT JOIN users u_approved ON s.approved_by = u_approved.user_code
+    LEFT JOIN users u_sent ON s.sent_to_client_by = u_sent.user_code
+    WHERE s.submission_code = ?
 ";
 
-$stmt = $conn->prepare($query);
-if ($submissionCode) {
-    $stmt->bind_param('s', $submissionCode);
-} else {
-    $stmt->bind_param('i', $submissionId);
-}
+$stmt = $conn->prepare($sql);
+$stmt->bind_param("s", $submission_code);
 $stmt->execute();
 $submission = $stmt->get_result()->fetch_assoc();
 
 if (!$submission) {
-    throw new Exception('Submission not found');
+    redirectBack('Submission not found');
 }
 
+// Permission check for own submissions
+if (!$canViewAll && $canViewOwn) {
+    if ($submission['submitted_by'] !== $user['user_code']) {
+        header('Location: /panel/errors/403.php');
+        exit;
+    }
+}
+
+// Get status history
+$historySQL = "
+    SELECT *
+    FROM submission_status_history
+    WHERE submission_code = ?
+    ORDER BY changed_at DESC
+";
+$stmt = $conn->prepare($historySQL);
+$stmt->bind_param("s", $submission_code);
+$stmt->execute();
+$history = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
 // Get notes
-$notesQuery = "
+$notesSQL = "
     SELECT n.*, u.name as created_by_name
-    FROM submission_notes n
+    FROM notes n
     LEFT JOIN users u ON n.created_by = u.user_code
-    WHERE n.submission_code = ?
+    WHERE n.entity_type = 'submission' AND n.entity_code = ?
     ORDER BY n.created_at DESC
 ";
-$stmt = $conn->prepare($notesQuery);
-$stmt->bind_param('s', $submission['submission_code']);
+$stmt = $conn->prepare($notesSQL);
+$stmt->bind_param("s", $submission_code);
 $stmt->execute();
 $notes = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
-// Check permissions
-$canEdit = ($submission['status'] === 'draft' && $submission['submitted_by'] === $user['user_code']) || $user['level'] === 'admin';
-$canApprove = ($submission['status'] === 'pending_review') && ($user['level'] === 'admin' || $user['level'] === 'manager');
-$canRecordResponse = $submission['status'] === 'submitted' && Permission::can('submissions', 'edit');
-
-// Status color mapping
-$statusColors = [
-    'draft' => 'secondary',
-    'pending_review' => 'warning',
-    'approved' => 'info',
-    'submitted' => 'primary',
-    'accepted' => 'success',
-    'rejected' => 'danger',
-    'withdrawn' => 'dark'
+// Page config
+$pageTitle = "Submission: {$submission['candidate_name']} → {$submission['job_title']}";
+$breadcrumbs = [
+    ['title' => 'Dashboard', 'url' => '/panel/'],
+    ['title' => 'Submissions', 'url' => '/panel/modules/submissions/list.php'],
+    ['title' => $submission['submission_code'], 'url' => '']
 ];
+
+// Determine available actions
+$canApprove = Permission::can('submissions', 'approve') && $submission['internal_status'] === 'pending';
+$canSendToClient = Permission::can('submissions', 'send_client') && 
+                   $submission['internal_status'] === 'approved' && 
+                   $submission['client_status'] === 'not_sent';
+$canUpdateStatus = Permission::can('submissions', 'update_status') && 
+                   $submission['internal_status'] === 'approved' &&
+                   in_array($submission['client_status'], ['submitted', 'interviewing', 'offered']);
+$canWithdraw = Permission::can('submissions', 'withdraw') && 
+               !in_array($submission['client_status'], ['placed', 'rejected', 'withdrawn']);
+
+require_once __DIR__ . '/../../includes/header.php';
 ?>
 
-<div class="container-xxl flex-grow-1 container-p-y">
-    <!-- Header -->
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <h4 class="fw-bold mb-1">
-                <i class="bx bx-file text-primary me-2"></i>
-                <?= htmlspecialchars($submission['submission_code']) ?>
-            </h4>
-            <p class="text-muted mb-0">
-                <span class="badge bg-<?= $statusColors[$submission['status']] ?? 'secondary' ?>">
-                    <?= ucwords(str_replace('_', ' ', $submission['status'])) ?>
-                </span>
-                <?php if ($submission['converted_to_application']): ?>
-                    <span class="badge bg-success ms-2">
-                        <i class="bx bx-check-circle"></i> Converted to Application
-                    </span>
-                <?php endif; ?>
-            </p>
-        </div>
-        <div>
-            <?php if ($canEdit): ?>
-            <a href="?action=edit&code=<?= urlencode($submission['submission_code']) ?>" class="btn btn-primary me-2">
-                <i class="bx bx-edit me-1"></i> Edit
-            </a>
-            <?php endif; ?>
-            
-            <?php if ($canApprove): ?>
-            <button class="btn btn-success me-2" onclick="approveSubmission()">
-                <i class="bx bx-check me-1"></i> Approve
-            </button>
-            <button class="btn btn-danger me-2" onclick="rejectSubmission()">
-                <i class="bx bx-x me-1"></i> Reject
-            </button>
-            <?php endif; ?>
-            
-            <?php if ($canRecordResponse): ?>
-            <button class="btn btn-info me-2" onclick="recordClientResponse()">
-                <i class="bx bx-message-dots me-1"></i> Client Response
-            </button>
-            <?php endif; ?>
-            
-            <a href="?action=list" class="btn btn-secondary">
-                <i class="bx bx-arrow-back me-1"></i> Back
-            </a>
-        </div>
-    </div>
+<style>
+.timeline {
+    position: relative;
+    padding: 0;
+    list-style: none;
+}
+.timeline::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 40px;
+    width: 2px;
+    background: #dee2e6;
+}
+.timeline-item {
+    position: relative;
+    padding-left: 80px;
+    padding-bottom: 30px;
+}
+.timeline-marker {
+    position: absolute;
+    left: 32px;
+    top: 0;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 3px solid #fff;
+}
+.timeline-marker.active {
+    background: #0d6efd;
+    box-shadow: 0 0 0 4px rgba(13, 110, 253, 0.2);
+}
+.timeline-marker.completed {
+    background: #198754;
+}
+.timeline-marker.pending {
+    background: #6c757d;
+    border-color: #dee2e6;
+}
+.info-card {
+    border-left: 4px solid #0d6efd;
+}
+.action-card {
+    background: #f8f9fa;
+    border: 2px dashed #dee2e6;
+    transition: all 0.2s;
+}
+.action-card:hover {
+    border-color: #0d6efd;
+    background: #fff;
+}
+</style>
 
-    <div class="row">
-        <!-- Main Content -->
-        <div class="col-lg-8">
-            <!-- Candidate & Job Info -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">Submission Summary</h5>
-                </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <h6 class="text-muted mb-2">Candidate</h6>
-                            <h5><?= htmlspecialchars($submission['candidate_name']) ?></h5>
-                            <p class="mb-1">
-                                <i class="bx bx-envelope me-1"></i>
-                                <?= htmlspecialchars($submission['candidate_email']) ?>
-                            </p>
-                            <?php if ($submission['candidate_phone']): ?>
-                            <p class="mb-1">
-                                <i class="bx bx-phone me-1"></i>
-                                <?= htmlspecialchars($submission['candidate_phone']) ?>
-                            </p>
-                            <?php endif; ?>
-                            <?php if ($submission['current_position']): ?>
-                            <p class="mb-1">
-                                <i class="bx bx-briefcase me-1"></i>
-                                <?= htmlspecialchars($submission['current_position']) ?>
-                            </p>
-                            <?php endif; ?>
-                            <?php if ($submission['experience_years']): ?>
-                            <p class="mb-0">
-                                <i class="bx bx-time me-1"></i>
-                                <?= $submission['experience_years'] ?> years experience
-                            </p>
-                            <?php endif; ?>
+<!-- Header Section -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card info-card">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <h4 class="mb-2">
+                            <i class="bx bx-user-circle"></i>
+                            <?= escape($submission['candidate_name']) ?>
+                            <i class="bx bx-right-arrow-alt"></i>
+                            <?= escape($submission['job_title']) ?>
+                        </h4>
+                        <p class="text-muted mb-0">
+                            <strong>Company:</strong> <?= escape($submission['company_name']) ?> |
+                            <strong>Submitted:</strong> <?= date('M d, Y g:i A', strtotime($submission['created_at'])) ?> by <?= escape($submission['submitted_by_name']) ?>
+                        </p>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <?php
+                        $internalBadge = [
+                            'pending' => ['warning', 'time-five'],
+                            'approved' => ['success', 'check-circle'],
+                            'rejected' => ['danger', 'x-circle'],
+                            'withdrawn' => ['secondary', 'minus-circle']
+                        ];
+                        $clientBadge = [
+                            'not_sent' => ['secondary', 'circle'],
+                            'submitted' => ['info', 'send'],
+                            'interviewing' => ['primary', 'user-voice'],
+                            'offered' => ['warning', 'gift'],
+                            'placed' => ['success', 'trophy'],
+                            'rejected' => ['danger', 'x'],
+                            'withdrawn' => ['secondary', 'minus']
+                        ];
+                        
+                        $iBadge = $internalBadge[$submission['internal_status']] ?? ['secondary', 'circle'];
+                        $cBadge = $clientBadge[$submission['client_status']] ?? ['secondary', 'circle'];
+                        ?>
+                        <div class="mb-2">
+                            <small class="text-muted d-block">Internal Status</small>
+                            <span class="badge bg-<?= $iBadge[0] ?> px-3 py-2">
+                                <i class="bx bx-<?= $iBadge[1] ?>"></i>
+                                <?= ucfirst($submission['internal_status']) ?>
+                            </span>
                         </div>
-                        
-                        <div class="col-md-6 mb-3">
-                            <h6 class="text-muted mb-2">Job & Client</h6>
-                            <h5><?= htmlspecialchars($submission['job_title']) ?></h5>
-                            <p class="mb-1">
-                                <i class="bx bx-building me-1"></i>
-                                <strong><?= htmlspecialchars($submission['client_name']) ?></strong>
-                            </p>
-                            <p class="mb-1">
-                                <i class="bx bx-user me-1"></i>
-                                Contact: <?= htmlspecialchars($submission['client_contact']) ?>
-                            </p>
-                            <a href="../jobs/view.php?code=<?= urlencode($submission['job_code']) ?>" 
-                               class="btn btn-sm btn-outline-primary">
-                                <i class="bx bx-link-external me-1"></i> View Job
-                            </a>
+                        <div>
+                            <small class="text-muted d-block">Client Status</small>
+                            <span class="badge bg-<?= $cBadge[0] ?> px-3 py-2">
+                                <i class="bx bx-<?= $cBadge[1] ?>"></i>
+                                <?= ucfirst(str_replace('_', ' ', $submission['client_status'])) ?>
+                            </span>
                         </div>
                     </div>
-                </div>
-            </div>
-
-            <!-- Proposal Details -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">Rate Proposal</h5>
-                </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-4">
-                            <h6 class="text-muted mb-1">Proposed Rate</h6>
-                            <h4 class="mb-0 text-primary">
-                                <?= $submission['currency'] ?> <?= number_format($submission['proposed_rate'], 2) ?>
-                                <small class="text-muted">/<?= $submission['rate_type'] ?></small>
-                            </h4>
-                        </div>
-                        <?php if ($submission['availability_date']): ?>
-                        <div class="col-md-4">
-                            <h6 class="text-muted mb-1">Available From</h6>
-                            <p class="mb-0"><?= date('M d, Y', strtotime($submission['availability_date'])) ?></p>
-                        </div>
-                        <?php endif; ?>
-                        <?php if ($submission['contract_duration']): ?>
-                        <div class="col-md-4">
-                            <h6 class="text-muted mb-1">Contract Duration</h6>
-                            <p class="mb-0"><?= $submission['contract_duration'] ?> months</p>
-                        </div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Assessment -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">Candidate Assessment</h5>
-                </div>
-                <div class="card-body">
-                    <div class="mb-4">
-                        <h6 class="text-primary mb-2">Why This Candidate?</h6>
-                        <p><?= nl2br(htmlspecialchars($submission['fit_reason'])) ?></p>
-                    </div>
-                    
-                    <?php if ($submission['key_strengths']): ?>
-                    <div class="mb-4">
-                        <h6 class="text-primary mb-2">Key Strengths</h6>
-                        <p><?= nl2br(htmlspecialchars($submission['key_strengths'])) ?></p>
-                    </div>
-                    <?php endif; ?>
-                    
-                    <?php if ($submission['concerns']): ?>
-                    <div class="alert alert-warning">
-                        <h6 class="mb-2"><i class="bx bx-error-circle me-2"></i>Internal Concerns</h6>
-                        <p class="mb-0"><?= nl2br(htmlspecialchars($submission['concerns'])) ?></p>
-                    </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-
-            <!-- Client Response -->
-            <?php if ($submission['client_response']): ?>
-            <div class="card mb-4 border-<?= $submission['client_response'] === 'interested' ? 'success' : 'danger' ?>">
-                <div class="card-header bg-label-<?= $submission['client_response'] === 'interested' ? 'success' : 'danger' ?>">
-                    <h5 class="mb-0">
-                        <i class="bx bx-message-dots me-2"></i>Client Response
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <div class="mb-2">
-                        <strong>Response:</strong> 
-                        <span class="badge bg-<?= $submission['client_response'] === 'interested' ? 'success' : 'danger' ?>">
-                            <?= ucwords(str_replace('_', ' ', $submission['client_response'])) ?>
-                        </span>
-                    </div>
-                    <?php if ($submission['client_response_date']): ?>
-                    <div class="mb-2">
-                        <strong>Date:</strong> <?= date('M d, Y H:i', strtotime($submission['client_response_date'])) ?>
-                    </div>
-                    <?php endif; ?>
-                    <?php if ($submission['client_feedback']): ?>
-                    <div class="mt-3">
-                        <strong>Feedback:</strong>
-                        <p class="mb-0 mt-1"><?= nl2br(htmlspecialchars($submission['client_feedback'])) ?></p>
-                    </div>
-                    <?php endif; ?>
-                    
-                    <?php if ($submission['client_response'] === 'interested' && !$submission['converted_to_application']): ?>
-                    <div class="mt-3">
-                        <button class="btn btn-success" onclick="convertToApplication()">
-                            <i class="bx bx-check-double me-1"></i> Convert to Application
-                        </button>
-                    </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-            <?php endif; ?>
-
-            <!-- Activity Notes -->
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0">Activity & Notes</h5>
-                </div>
-                <div class="card-body">
-                    <!-- Add Note Form -->
-                    <form id="addNoteForm" class="mb-4">
-                        <input type="hidden" name="csrf_token" value="<?= CSRFToken::generate() ?>">
-                        <input type="hidden" name="submission_code" value="<?= htmlspecialchars($submission['submission_code']) ?>">
-                        <div class="input-group">
-                            <select name="note_type" class="form-select" style="max-width: 150px;">
-                                <option value="general">General</option>
-                                <option value="internal">Internal</option>
-                                <option value="client_feedback">Client Feedback</option>
-                                <option value="followup">Follow-up</option>
-                            </select>
-                            <input type="text" name="note" class="form-control" placeholder="Add a note..." required>
-                            <button type="submit" class="btn btn-primary">
-                                <i class="bx bx-plus"></i> Add
-                            </button>
-                        </div>
-                    </form>
-
-                    <!-- Notes Timeline -->
-                    <?php if (empty($notes)): ?>
-                        <p class="text-muted text-center py-3">No notes yet</p>
-                    <?php else: ?>
-                        <div class="activity-timeline">
-                            <?php foreach ($notes as $note): ?>
-                            <div class="timeline-item mb-3 pb-3 border-bottom">
-                                <div class="d-flex justify-content-between">
-                                    <div>
-                                        <span class="badge bg-label-secondary"><?= ucfirst($note['note_type']) ?></span>
-                                        <strong class="ms-2"><?= htmlspecialchars($note['created_by_name']) ?></strong>
-                                        <small class="text-muted">- <?= date('M d, Y H:i', strtotime($note['created_at'])) ?></small>
-                                    </div>
-                                </div>
-                                <p class="mb-0 mt-2"><?= nl2br(htmlspecialchars($note['note'])) ?></p>
-                            </div>
-                            <?php endforeach; ?>
-                        </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-        </div>
-
-        <!-- Sidebar -->
-        <div class="col-lg-4">
-            <!-- Timeline -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">Submission Timeline</h5>
-                </div>
-                <div class="card-body">
-                    <ul class="timeline">
-                        <li class="timeline-item timeline-item-transparent">
-                            <span class="timeline-point timeline-point-primary"></span>
-                            <div class="timeline-event">
-                                <div class="timeline-header mb-1">
-                                    <h6 class="mb-0">Created</h6>
-                                    <small class="text-muted"><?= date('M d, Y H:i', strtotime($submission['created_at'])) ?></small>
-                                </div>
-                                <p class="mb-0">By <?= htmlspecialchars($submission['submitted_by_name']) ?></p>
-                            </div>
-                        </li>
-                        
-                        <?php if ($submission['reviewed_at']): ?>
-                        <li class="timeline-item timeline-item-transparent">
-                            <span class="timeline-point timeline-point-<?= $submission['status'] === 'approved' ? 'success' : 'danger' ?>"></span>
-                            <div class="timeline-event">
-                                <div class="timeline-header mb-1">
-                                    <h6 class="mb-0">Reviewed</h6>
-                                    <small class="text-muted"><?= date('M d, Y H:i', strtotime($submission['reviewed_at'])) ?></small>
-                                </div>
-                                <p class="mb-0">By <?= htmlspecialchars($submission['reviewed_by_name']) ?></p>
-                                <?php if ($submission['review_notes']): ?>
-                                <p class="small mb-0 mt-1"><?= htmlspecialchars($submission['review_notes']) ?></p>
-                                <?php endif; ?>
-                            </div>
-                        </li>
-                        <?php endif; ?>
-                        
-                        <?php if ($submission['submitted_to_client_at']): ?>
-                        <li class="timeline-item timeline-item-transparent">
-                            <span class="timeline-point timeline-point-info"></span>
-                            <div class="timeline-event">
-                                <div class="timeline-header mb-1">
-                                    <h6 class="mb-0">Submitted to Client</h6>
-                                    <small class="text-muted"><?= date('M d, Y H:i', strtotime($submission['submitted_to_client_at'])) ?></small>
-                                </div>
-                            </div>
-                        </li>
-                        <?php endif; ?>
-                        
-                        <?php if ($submission['client_response_date']): ?>
-                        <li class="timeline-item timeline-item-transparent">
-                            <span class="timeline-point timeline-point-<?= $submission['client_response'] === 'interested' ? 'success' : 'warning' ?>"></span>
-                            <div class="timeline-event">
-                                <div class="timeline-header mb-1">
-                                    <h6 class="mb-0">Client Response</h6>
-                                    <small class="text-muted"><?= date('M d, Y H:i', strtotime($submission['client_response_date'])) ?></small>
-                                </div>
-                                <p class="mb-0"><?= ucwords(str_replace('_', ' ', $submission['client_response'])) ?></p>
-                            </div>
-                        </li>
-                        <?php endif; ?>
-                        
-                        <?php if ($submission['converted_to_application']): ?>
-                        <li class="timeline-item timeline-item-transparent">
-                            <span class="timeline-point timeline-point-success"></span>
-                            <div class="timeline-event">
-                                <div class="timeline-header mb-1">
-                                    <h6 class="mb-0">Converted to Application</h6>
-                                </div>
-                                <a href="../applications/view.php?id=<?= $submission['application_id'] ?>" class="btn btn-sm btn-success">
-                                    View Application
-                                </a>
-                            </div>
-                        </li>
-                        <?php endif; ?>
-                    </ul>
-                </div>
-            </div>
-
-            <!-- Metadata -->
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="mb-0">Details</h5>
-                </div>
-                <div class="card-body">
-                    <dl class="row mb-0">
-                        <dt class="col-6">Submission Code:</dt>
-                        <dd class="col-6"><?= htmlspecialchars($submission['submission_code']) ?></dd>
-                        
-                        <dt class="col-6">Submitted By:</dt>
-                        <dd class="col-6"><?= htmlspecialchars($submission['submitted_by_name']) ?></dd>
-                        
-                        <dt class="col-6">Type:</dt>
-                        <dd class="col-6"><?= ucwords(str_replace('_', ' ', $submission['submission_type'])) ?></dd>
-                        
-                        <?php if ($submission['followup_count'] > 0): ?>
-                        <dt class="col-6">Follow-ups:</dt>
-                        <dd class="col-6"><?= $submission['followup_count'] ?></dd>
-                        <?php endif; ?>
-                    </dl>
                 </div>
             </div>
         </div>
     </div>
 </div>
 
-<script>
-$(document).ready(function() {
-    $('#addNoteForm').on('submit', async function(e) {
-        e.preventDefault();
-        
-        const formData = new FormData(this);
-        
-        try {
-            const response = await fetch('handlers/add-note.php', {
-                method: 'POST',
-                body: formData
-            });
-            
-            const result = await response.json();
-            
-            if (result.success) {
-                location.reload();
-            } else {
-                alert('Error: ' + result.message);
-            }
-        } catch (error) {
-            alert('Failed to add note');
-        }
-    });
-});
+<!-- Main Content -->
+<div class="row">
+    <!-- Left Column: Details -->
+    <div class="col-md-8">
+        <!-- Candidate Information -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bx bx-user"></i> Candidate Information</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p><strong>Email:</strong> 
+                            <a href="mailto:<?= escape($submission['candidate_email']) ?>">
+                                <?= escape($submission['candidate_email']) ?>
+                            </a>
+                        </p>
+                        <p><strong>Phone:</strong> 
+                            <a href="tel:<?= escape($submission['candidate_phone']) ?>">
+                                <?= escape($submission['candidate_phone']) ?>
+                            </a>
+                        </p>
+                        <p><strong>Location:</strong> <?= escape($submission['current_location'] ?: 'N/A') ?></p>
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>Current Position:</strong> <?= escape($submission['current_position'] ?: 'N/A') ?></p>
+                        <p><strong>Company:</strong> <?= escape($submission['current_company'] ?: 'N/A') ?></p>
+                        <p><strong>Experience:</strong> <?= $submission['total_experience'] ? $submission['total_experience'] . ' years' : 'N/A' ?></p>
+                    </div>
+                    <div class="col-12">
+                        <p><strong>Skills:</strong></p>
+                        <p class="text-muted"><?= nl2br(escape($submission['skills'] ?: 'No skills listed')) ?></p>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <a href="/panel/modules/candidates/view.php?code=<?= escape($submission['candidate_code']) ?>" 
+                       class="btn btn-sm btn-outline-primary" target="_blank">
+                        <i class="bx bx-link-external"></i> View Full Candidate Profile
+                    </a>
+                    <?php if ($submission['resume_path']): ?>
+                        <a href="/<?= escape($submission['resume_path']) ?>" 
+                           class="btn btn-sm btn-outline-secondary" target="_blank">
+                            <i class="bx bx-download"></i> Download Resume
+                        </a>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
 
-async function approveSubmission() {
-    const notes = prompt('Approval notes (optional):');
-    if (notes === null) return;
-    
-    try {
-        const response = await fetch('handlers/approve.php', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                submission_code: '<?= $submission['submission_code'] ?>',
-                notes: notes
-            })
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            location.reload();
-        } else {
-            alert('Error: ' + result.message);
-        }
-    } catch (error) {
-        alert('Failed to approve submission');
-    }
-}
+        <!-- Job Information -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bx bx-briefcase"></i> Job Information</h5>
+            </div>
+            <div class="card-body">
+                <h6><?= escape($submission['job_title']) ?></h6>
+                <p class="text-muted mb-3">
+                    <?= escape($submission['company_name']) ?> | 
+                    <?= escape($submission['job_location'] ?: 'Location TBD') ?> |
+                    <?= ucfirst($submission['employment_type']) ?>
+                </p>
+                <p><strong>Job Code:</strong> <?= escape($submission['job_code']) ?></p>
+                <?php if ($submission['job_description']): ?>
+                    <div class="mt-3">
+                        <strong>Description:</strong>
+                        <div class="text-muted mt-2" style="max-height: 200px; overflow-y: auto;">
+                            <?= nl2br(escape($submission['job_description'])) ?>
+                        </div>
+                    </div>
+                <?php endif; ?>
+                <div class="mt-3">
+                    <a href="/panel/modules/jobs/view.php?code=<?= escape($submission['job_code']) ?>" 
+                       class="btn btn-sm btn-outline-primary" target="_blank">
+                        <i class="bx bx-link-external"></i> View Full Job Details
+                    </a>
+                </div>
+            </div>
+        </div>
 
-function rejectSubmission() {
-    // Similar to approve
-    const reason = prompt('Rejection reason:');
-    if (!reason) return;
-    
-    // Call reject handler
-}
+        <!-- Submission Notes -->
+        <?php if ($submission['submission_notes'] || $submission['approval_notes'] || $submission['interview_notes'] || $submission['offer_notes'] || $submission['placement_notes']): ?>
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bx bx-note"></i> Submission Notes</h5>
+            </div>
+            <div class="card-body">
+                <?php if ($submission['submission_notes']): ?>
+                    <div class="mb-3">
+                        <strong>Initial Submission Notes:</strong>
+                        <p class="text-muted mt-1"><?= nl2br(escape($submission['submission_notes'])) ?></p>
+                    </div>
+                <?php endif; ?>
+                
+                <?php if ($submission['approval_notes']): ?>
+                    <div class="mb-3">
+                        <strong>Approval Notes:</strong>
+                        <p class="text-muted mt-1"><?= nl2br(escape($submission['approval_notes'])) ?></p>
+                    </div>
+                <?php endif; ?>
+                
+                <?php if ($submission['interview_notes']): ?>
+                    <div class="mb-3">
+                        <strong>Interview Notes:</strong>
+                        <p class="text-muted mt-1"><?= nl2br(escape($submission['interview_notes'])) ?></p>
+                    </div>
+                <?php endif; ?>
+                
+                <?php if ($submission['offer_notes']): ?>
+                    <div class="mb-3">
+                        <strong>Offer Notes:</strong>
+                        <p class="text-muted mt-1"><?= nl2br(escape($submission['offer_notes'])) ?></p>
+                    </div>
+                <?php endif; ?>
+                
+                <?php if ($submission['placement_notes']): ?>
+                    <div class="mb-3">
+                        <strong>Placement Notes:</strong>
+                        <p class="text-muted mt-1"><?= nl2br(escape($submission['placement_notes'])) ?></p>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+        <?php endif; ?>
 
-function recordClientResponse() {
-    // Open modal to record client feedback
-}
+        <!-- Timeline -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bx bx-time"></i> Timeline</h5>
+            </div>
+            <div class="card-body">
+                <ul class="timeline">
+                    <!-- Created -->
+                    <li class="timeline-item">
+                        <div class="timeline-marker completed"></div>
+                        <div class="timeline-content">
+                            <h6 class="mb-1">Submission Created</h6>
+                            <p class="text-muted small mb-1">
+                                <?= date('M d, Y g:i A', strtotime($submission['created_at'])) ?>
+                                by <?= escape($submission['submitted_by_name']) ?>
+                            </p>
+                            <span class="badge bg-secondary">pending</span>
+                        </div>
+                    </li>
 
-async function convertToApplication() {
-    if (!confirm('Convert this submission to an application? This will create an entry in the applications pipeline.')) {
-        return;
-    }
-    
-    try {
-        const response = await fetch('handlers/convert-to-application.php', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                submission_code: '<?= $submission['submission_code'] ?>'
-            })
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            window.location.href = '../applications/view.php?id=' + result.application_id;
-        } else {
-            alert('Error: ' + result.message);
-        }
-    } catch (error) {
-        alert('Failed to convert submission');
-    }
-}
-</script>
+                    <!-- Approval/Rejection -->
+                    <?php if ($submission['approved_at']): ?>
+                        <li class="timeline-item">
+                            <div class="timeline-marker <?= $submission['internal_status'] === 'approved' ? 'completed' : 'active' ?>"></div>
+                            <div class="timeline-content">
+                                <h6 class="mb-1"><?= $submission['internal_status'] === 'approved' ? 'Approved' : 'Rejected' ?></h6>
+                                <p class="text-muted small mb-1">
+                                    <?= date('M d, Y g:i A', strtotime($submission['approved_at'])) ?>
+                                    by <?= escape($submission['approved_by_name']) ?>
+                                </p>
+                                <span class="badge bg-<?= $submission['internal_status'] === 'approved' ? 'success' : 'danger' ?>">
+                                    <?= $submission['internal_status'] ?>
+                                </span>
+                            </div>
+                        </li>
+                    <?php endif; ?>
+
+                    <!-- Sent to Client -->
+                    <?php if ($submission['sent_to_client_at']): ?>
+                        <li class="timeline-item">
+                            <div class="timeline-marker completed"></div>
+                            <div class="timeline-content">
+                                <h6 class="mb-1">Sent to Client</h6>
+                                <p class="text-muted small mb-1">
+                                    <?= date('M d, Y g:i A', strtotime($submission['sent_to_client_at'])) ?>
+                                    by <?= escape($submission['sent_by_name']) ?>
+                                </p>
+                                <span class="badge bg-info">submitted</span>
+                            </div>
+                        </li>
+                    <?php endif; ?>
+
+                    <!-- Interview -->
+                    <?php if ($submission['interview_date']): ?>
+                        <li class="timeline-item">
+                            <div class="timeline-marker completed"></div>
+                            <div class="timeline-content">
+                                <h6 class="mb-1">Interview Scheduled</h6>
+                                <p class="text-muted small mb-1">
+                                    <?= date('M d, Y g:i A', strtotime($submission['interview_date'])) ?>
+                                </p>
+                                <span class="badge bg-primary">interviewing</span>
+                                <?php if ($submission['interview_result']): ?>
+                                    <span class="badge bg-<?= $submission['interview_result'] === 'positive' ? 'success' : ($submission['interview_result'] === 'negative' ? 'danger' : 'warning') ?>">
+                                        <?= ucfirst($submission['interview_result']) ?>
+                                    </span>
+                                <?php endif; ?>
+                            </div>
+                        </li>
+                    <?php endif; ?>
+
+                    <!-- Offer -->
+                    <?php if ($submission['offer_date']): ?>
+                        <li class="timeline-item">
+                            <div class="timeline-marker completed"></div>
+                            <div class="timeline-content">
+                                <h6 class="mb-1">Offer Extended</h6>
+                                <p class="text-muted small mb-1">
+                                    <?= date('M d, Y', strtotime($submission['offer_date'])) ?>
+                                </p>
+                                <span class="badge bg-warning">offered</span>
+                            </div>
+                        </li>
+                    <?php endif; ?>
+
+                    <!-- Placement/Rejection -->
+                    <?php if ($submission['placement_date']): ?>
+                        <li class="timeline-item">
+                            <div class="timeline-marker completed"></div>
+                            <div class="timeline-content">
+                                <h6 class="mb-1">Successfully Placed</h6>
+                                <p class="text-muted small mb-1">
+                                    <?= date('M d, Y', strtotime($submission['placement_date'])) ?>
+                                </p>
+                                <span class="badge bg-success">placed</span>
+                            </div>
+                        </li>
+                    <?php elseif ($submission['rejected_date']): ?>
+                        <li class="timeline-item">
+                            <div class="timeline-marker active"></div>
+                            <div class="timeline-content">
+                                <h6 class="mb-1">Rejected</h6>
+                                <p class="text-muted small mb-1">
+                                    <?= date('M d, Y', strtotime($submission['rejected_date'])) ?>
+                                    <?= $submission['rejected_by'] ? 'by ' . ucfirst($submission['rejected_by']) : '' ?>
+                                </p>
+                                <span class="badge bg-danger">rejected</span>
+                            </div>
+                        </li>
+                    <?php endif; ?>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Column: Actions & Client Info -->
+    <div class="col-md-4">
+        <!-- Actions Card -->
+        <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bx bx-cog"></i> Actions</h5>
+            </div>
+            <div class="card-body">
+                <?php if ($canApprove): ?>
+                    <div class="action-card p-3 mb-3 text-center">
+                        <h6>Approval Required</h6>
+                        <p class="text-muted small mb-3">Review and approve or reject this submission</p>
+                        <button type="button" class="btn btn-success btn-sm me-2" data-bs-toggle="modal" data-bs-target="#approveModal">
+                            <i class="bx bx-check"></i> Approve
+                        </button>
+                        <button type="button" class="btn btn-danger btn-sm" data-bs-toggle="modal" data-bs-target="#rejectModal">
+                            <i class="bx bx-x"></i> Reject
+                        </button>
+                    </div>
+                <?php endif; ?>
+
+                <?php if ($canSendToClient): ?>
+                    <div class="action-card p-3 mb-3 text-center">
+                        <h6>Ready to Send</h6>
+                        <p class="text-muted small mb-3">This submission has been approved</p>
+                        <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#sendToClientModal">
+                            <i class="bx bx-send"></i> Send to Client
+                        </button>
+                    </div>
+                <?php endif; ?>
+
+                <?php if ($canUpdateStatus): ?>
+                    <div class="action-card p-3 mb-3">
+                        <h6 class="text-center">Update Status</h6>
+                        <div class="d-grid gap-2 mt-3">
+                            <?php if ($submission['client_status'] === 'submitted'): ?>
+                                <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#interviewModal">
+                                    <i class="bx bx-calendar"></i> Schedule Interview
+                                </button>
+                            <?php endif; ?>
+                            
+                            <?php if (in_array($submission['client_status'], ['submitted', 'interviewing'])): ?>
+                                <button class="btn btn-sm btn-outline-warning" data-bs-toggle="modal" data-bs-target="#offerModal">
+                                    <i class="bx bx-gift"></i> Record Offer
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#rejectByClientModal">
+                                    <i class="bx bx-x"></i> Mark as Rejected
+                                </button>
+                            <?php endif; ?>
+                            
+                            <?php if ($submission['client_status'] === 'offered'): ?>
+                                <button class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#placementModal">
+                                    <i class="bx bx-trophy"></i> Record Placement
+                                </button>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                <?php endif; ?>
+
+                <?php if ($canWithdraw): ?>
+                    <div class="action-card p-3 mb-3 text-center">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#withdrawModal">
+                            <i class="bx bx-x-circle"></i> Withdraw Submission
+                        </button>
+                    </div>
+                <?php endif; ?>
+
+                <div class="d-grid gap-2">
+                    <a href="list.php" class="btn btn-outline-secondary btn-sm">
+                        <i class="bx bx-arrow-back"></i> Back to List
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Client Contact Info -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bx bx-building"></i> Client Contact</h5>
+            </div>
+            <div class="card-body">
+                <h6><?= escape($submission['company_name']) ?></h6>
+                <?php if ($submission['contact_person']): ?>
+                    <p class="mb-1">
+                        <strong>Contact:</strong> <?= escape($submission['contact_person']) ?>
+                    </p>
+                <?php endif; ?>
+                <?php if ($submission['client_email']): ?>
+                    <p class="mb-1">
+                        <strong>Email:</strong> 
+                        <a href="mailto:<?= escape($submission['client_email']) ?>">
+                            <?= escape($submission['client_email']) ?>
+                        </a>
+                    </p>
+                <?php endif; ?>
+                <?php if ($submission['client_phone']): ?>
+                    <p class="mb-1">
+                        <strong>Phone:</strong> 
+                        <a href="tel:<?= escape($submission['client_phone']) ?>">
+                            <?= escape($submission['client_phone']) ?>
+                        </a>
+                    </p>
+                <?php endif; ?>
+                <div class="mt-3">
+                    <a href="/panel/modules/clients/view.php?code=<?= escape($submission['client_code']) ?>" 
+                       class="btn btn-sm btn-outline-primary" target="_blank">
+                        <i class="bx bx-link-external"></i> View Client Profile
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modals -->
+<?php include __DIR__ . '/modals/approval-modal.php'; ?>
+<?php include __DIR__ . '/modals/send-to-client-modal.php'; ?>
+<?php include __DIR__ . '/modals/interview-modal.php'; ?>
+<?php include __DIR__ . '/modals/offer-modal.php'; ?>
+<?php include __DIR__ . '/modals/placement-modal.php'; ?>
+<?php include __DIR__ . '/modals/reject-modal.php'; ?>
+<?php include __DIR__ . '/modals/withdraw-modal.php'; ?>
+
+<?php require_once __DIR__ . '/../../includes/footer.php'; ?>

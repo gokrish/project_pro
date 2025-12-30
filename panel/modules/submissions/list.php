@@ -1,361 +1,519 @@
 <?php
 /**
  * Submissions List
- * File: panel/modules/submissions/list.php
+ * Main view with filters, statistics, and actions
  */
+require_once __DIR__ . '/../_common.php';
 
-if (!defined('INCLUDED_FROM_INDEX')) {
-    define('INCLUDED_FROM_INDEX', true);
-}
 use ProConsultancy\Core\Permission;
 use ProConsultancy\Core\Database;
 use ProConsultancy\Core\Auth;
 
+$user = Auth::user();
 $db = Database::getInstance();
 $conn = $db->getConnection();
-$user = Auth::user();
 
-// Get filters
+// Page config
+$pageTitle = 'Submissions';
+$breadcrumbs = [
+    ['title' => 'Dashboard', 'url' => '/panel/'],
+    ['title' => 'Submissions', 'url' => '']
+];
+
+// Check permission
+$canViewAll = Permission::can('submissions', 'view_all');
+$canViewOwn = Permission::can('submissions', 'view_own');
+
+if (!$canViewAll && !$canViewOwn) {
+    header('Location: /panel/errors/403.php');
+    exit;
+}
+
+// Filters
 $filters = [
-    'status' => input('status', ''),
-    'client_code' => input('client_code', ''),
-    'job_code' => input('job_code', ''),
-    'submitted_by' => input('submitted_by', ''),
-    'search' => input('search', '')
+    'internal_status' => input('internal_status', ''),
+    'client_status' => input('client_status', ''),
+    'candidate' => input('candidate', ''),
+    'job' => input('job', ''),
+    'client' => input('client', ''),
+    'date_from' => input('date_from', ''),
+    'date_to' => input('date_to', ''),
+    'submitted_by' => input('submitted_by', '')
 ];
 
 // Build WHERE clause
-$whereConditions = ['s.deleted_at IS NULL'];
+$where = ['s.deleted_at IS NULL'];
 $params = [];
 $types = '';
 
-if (!empty($filters['status'])) {
-    $whereConditions[] = "s.status = ?";
-    $params[] = $filters['status'];
+if ($filters['internal_status']) {
+    $where[] = "s.internal_status = ?";
+    $params[] = $filters['internal_status'];
     $types .= 's';
 }
 
-if (!empty($filters['client_code'])) {
-    $whereConditions[] = "s.client_code = ?";
-    $params[] = $filters['client_code'];
+if ($filters['client_status']) {
+    $where[] = "s.client_status = ?";
+    $params[] = $filters['client_status'];
     $types .= 's';
 }
 
-if (!empty($filters['job_code'])) {
-    $whereConditions[] = "s.job_code = ?";
-    $params[] = $filters['job_code'];
+if ($filters['candidate']) {
+    $where[] = "(c.candidate_name LIKE ? OR c.email LIKE ? OR c.candidate_code LIKE ?)";
+    $searchTerm = "%{$filters['candidate']}%";
+    $params[] = $searchTerm;
+    $params[] = $searchTerm;
+    $params[] = $searchTerm;
+    $types .= 'sss';
+}
+
+if ($filters['job']) {
+    $where[] = "(j.job_title LIKE ? OR j.job_code LIKE ?)";
+    $searchTerm = "%{$filters['job']}%";
+    $params[] = $searchTerm;
+    $params[] = $searchTerm;
+    $types .= 'ss';
+}
+
+if ($filters['client']) {
+    $where[] = "cl.company_name LIKE ?";
+    $params[] = "%{$filters['client']}%";
     $types .= 's';
 }
 
-if (!empty($filters['submitted_by'])) {
-    $whereConditions[] = "s.submitted_by = ?";
+if ($filters['date_from']) {
+    $where[] = "DATE(s.created_at) >= ?";
+    $params[] = $filters['date_from'];
+    $types .= 's';
+}
+
+if ($filters['date_to']) {
+    $where[] = "DATE(s.created_at) <= ?";
+    $params[] = $filters['date_to'];
+    $types .= 's';
+}
+
+if ($filters['submitted_by']) {
+    $where[] = "s.submitted_by = ?";
     $params[] = $filters['submitted_by'];
     $types .= 's';
 }
 
-if (!empty($filters['search'])) {
-    $whereConditions[] = "(c.candidate_name LIKE ? OR j.title LIKE ? OR cl.company_name LIKE ?)";
-    $searchTerm = '%' . $filters['search'] . '%';
-    $params = array_merge($params, [$searchTerm, $searchTerm, $searchTerm]);
-    $types .= 'sss';
+// Permission-based filtering
+if (!$canViewAll && $canViewOwn) {
+    $where[] = "s.submitted_by = ?";
+    $params[] = $user['user_code'];
+    $types .= 's';
 }
 
-$whereClause = implode(' AND ', $whereConditions);
+$whereSQL = implode(' AND ', $where);
 
-// Get statistics
-$statsQuery = "
-    SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN s.status = 'draft' THEN 1 ELSE 0 END) as draft,
-        SUM(CASE WHEN s.status = 'pending_review' THEN 1 ELSE 0 END) as pending_review,
-        SUM(CASE WHEN s.status = 'approved' THEN 1 ELSE 0 END) as approved,
-        SUM(CASE WHEN s.status = 'submitted' THEN 1 ELSE 0 END) as submitted,
-        SUM(CASE WHEN s.client_response = 'interested' THEN 1 ELSE 0 END) as interested,
-        SUM(CASE WHEN s.converted_to_application = 1 THEN 1 ELSE 0 END) as converted
-    FROM candidate_submissions s
-    WHERE s.deleted_at IS NULL
+// Pagination
+$page = max(1, (int)input('page', 1));
+$perPage = 20;
+$offset = ($page - 1) * $perPage;
+
+// Get total count
+$countSQL = "
+    SELECT COUNT(*) as total
+    FROM submissions s
+    JOIN candidates c ON s.candidate_code = c.candidate_code
+    JOIN jobs j ON s.job_code = j.job_code
+    JOIN clients cl ON j.client_code = cl.client_code
+    LEFT JOIN users u ON s.submitted_by = u.user_code
+    WHERE $whereSQL
 ";
-$statsResult = $conn->query($statsQuery);
-$stats = $statsResult->fetch_assoc();
+
+$stmt = $conn->prepare($countSQL);
+if ($params) {
+    $stmt->bind_param($types, ...$params);
+}
+$stmt->execute();
+$totalCount = $stmt->get_result()->fetch_assoc()['total'];
+$totalPages = ceil($totalCount / $perPage);
 
 // Get submissions
-$query = "
+$sql = "
     SELECT 
         s.*,
         c.candidate_name,
         c.email as candidate_email,
-        j.title as job_title,
-        cl.company_name as client_name,
-        u.name as submitted_by_name
-    FROM candidate_submissions s
-    LEFT JOIN candidates c ON s.candidate_code = c.candidate_code
-    LEFT JOIN jobs j ON s.job_code = j.job_code
-    LEFT JOIN clients cl ON s.client_code = cl.client_code
+        c.phone as candidate_phone,
+        c.current_position,
+        j.job_title,
+        j.job_code,
+        j.client_code,
+        cl.company_name,
+        u.name as submitted_by_name,
+        DATEDIFF(NOW(), s.created_at) as days_pending
+    FROM submissions s
+    JOIN candidates c ON s.candidate_code = c.candidate_code
+    JOIN jobs j ON s.job_code = j.job_code
+    JOIN clients cl ON j.client_code = cl.client_code
     LEFT JOIN users u ON s.submitted_by = u.user_code
-    WHERE {$whereClause}
+    WHERE $whereSQL
     ORDER BY s.created_at DESC
+    LIMIT ? OFFSET ?
 ";
 
-$stmt = $conn->prepare($query);
-if (!empty($params)) {
-    $stmt->bind_param($types, ...$params);
-}
+$stmt = $conn->prepare($sql);
+$limitParams = array_merge($params, [$perPage, $offset]);
+$limitTypes = $types . 'ii';
+$stmt->bind_param($limitTypes, ...$limitParams);
 $stmt->execute();
 $submissions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
-// Get clients for filter
-$clientsQuery = "SELECT client_code, company_name FROM clients WHERE status = 'active' ORDER BY company_name";
-$clients = $conn->query($clientsQuery)->fetch_all(MYSQLI_ASSOC);
-
-// Get recruiters for filter
-$recruitersQuery = "
-    SELECT DISTINCT u.user_code, u.name 
-    FROM users u
-    INNER JOIN candidate_submissions s ON u.user_code = s.submitted_by
-    WHERE u.is_active = 1
-    ORDER BY u.name
+// Get statistics
+$statsWhere = $canViewAll ? '1=1' : "s.submitted_by = '{$user['user_code']}'";
+$statsSQL = "
+    SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN s.internal_status = 'pending' THEN 1 ELSE 0 END) as pending_approval,
+        SUM(CASE WHEN s.internal_status = 'approved' AND s.client_status = 'not_sent' THEN 1 ELSE 0 END) as ready_to_send,
+        SUM(CASE WHEN s.client_status = 'submitted' THEN 1 ELSE 0 END) as with_client,
+        SUM(CASE WHEN s.client_status = 'interviewing' THEN 1 ELSE 0 END) as interviewing,
+        SUM(CASE WHEN s.client_status = 'offered' THEN 1 ELSE 0 END) as offered,
+        SUM(CASE WHEN s.client_status = 'placed' THEN 1 ELSE 0 END) as placed,
+        SUM(CASE WHEN s.client_status = 'rejected' THEN 1 ELSE 0 END) as rejected
+    FROM submissions s
+    WHERE $statsWhere AND s.deleted_at IS NULL
 ";
-$recruiters = $conn->query($recruitersQuery)->fetch_all(MYSQLI_ASSOC);
+$stats = $conn->query($statsSQL)->fetch_assoc();
+
+// Get users for filter
+$usersSQL = "SELECT user_code, name FROM users WHERE is_active = 1 ORDER BY name";
+$users = $conn->query($usersSQL)->fetch_all(MYSQLI_ASSOC);
+
+require_once __DIR__ . '/../../includes/header.php';
 ?>
 
-<div class="container-xxl flex-grow-1 container-p-y">
-    <!-- Header -->
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <h4 class="fw-bold mb-1">
-                <i class="bx bx-send text-primary me-2"></i>Candidate Submissions
-            </h4>
-            <p class="text-muted mb-0">Internal candidate → client submissions</p>
-        </div>
-        <div>
-            <?php if (Permission::can('submissions', 'create')): ?>
-            <a href="?action=create" class="btn btn-primary">
-                <i class="bx bx-plus me-1"></i> New Submission
-            </a>
-            <?php endif; ?>
-        </div>
-    </div>
+<style>
+.stat-card {
+    border-left: 4px solid;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+.stat-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+.submission-row:hover {
+    background-color: #f8f9fa;
+}
+.status-badge {
+    font-size: 0.75rem;
+    padding: 0.35em 0.65em;
+    font-weight: 600;
+}
+.filter-section {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 1rem;
+}
+</style>
 
-    <!-- Statistics -->
-    <div class="row g-3 mb-4">
-        <div class="col-md-2">
-            <div class="card">
-                <div class="card-body">
-                    <h6 class="text-muted mb-1">Total</h6>
-                    <h3 class="mb-0"><?= number_format($stats['total']) ?></h3>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-2">
-            <div class="card">
-                <div class="card-body">
-                    <h6 class="text-muted mb-1">Draft</h6>
-                    <h3 class="mb-0"><?= number_format($stats['draft']) ?></h3>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-2">
-            <div class="card">
-                <div class="card-body">
-                    <h6 class="text-muted mb-1">Pending Review</h6>
-                    <h3 class="mb-0 text-warning"><?= number_format($stats['pending_review']) ?></h3>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-2">
-            <div class="card">
-                <div class="card-body">
-                    <h6 class="text-muted mb-1">Submitted</h6>
-                    <h3 class="mb-0 text-info"><?= number_format($stats['submitted']) ?></h3>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-2">
-            <div class="card">
-                <div class="card-body">
-                    <h6 class="text-muted mb-1">Interested</h6>
-                    <h3 class="mb-0 text-success"><?= number_format($stats['interested']) ?></h3>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-2">
-            <div class="card">
-                <div class="card-body">
-                    <h6 class="text-muted mb-1">Converted</h6>
-                    <h3 class="mb-0 text-primary"><?= number_format($stats['converted']) ?></h3>
+<!-- Statistics Cards -->
+<div class="row mb-4">
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="card stat-card border-warning">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-muted mb-1">Pending Approval</h6>
+                        <h2 class="mb-0 text-warning"><?= number_format($stats['pending_approval']) ?></h2>
+                        <small class="text-muted">Needs manager review</small>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="bx bx-time-five display-4 text-warning opacity-50"></i>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
-
-    <!-- Filters -->
-    <div class="card mb-4">
-        <div class="card-header d-flex justify-content-between">
-            <h5 class="mb-0"><i class="bx bx-filter-alt me-2"></i>Filters</h5>
-            <button type="button" class="btn btn-sm btn-outline-secondary" id="toggleFilters">
-                <i class="bx bx-chevron-down"></i>
-            </button>
-        </div>
-        <div class="card-body" id="filterPanel" style="<?= !empty(array_filter($filters)) ? '' : 'display:none;' ?>">
-            <form method="GET">
-                <input type="hidden" name="action" value="list">
-                <div class="row g-3">
-                    <div class="col-md-3">
-                        <label class="form-label">Status</label>
-                        <select name="status" class="form-select">
-                            <option value="">All Statuses</option>
-                            <option value="draft" <?= $filters['status'] === 'draft' ? 'selected' : '' ?>>Draft</option>
-                            <option value="pending_review" <?= $filters['status'] === 'pending_review' ? 'selected' : '' ?>>Pending Review</option>
-                            <option value="approved" <?= $filters['status'] === 'approved' ? 'selected' : '' ?>>Approved</option>
-                            <option value="submitted" <?= $filters['status'] === 'submitted' ? 'selected' : '' ?>>Submitted</option>
-                            <option value="accepted" <?= $filters['status'] === 'accepted' ? 'selected' : '' ?>>Accepted</option>
-                            <option value="rejected" <?= $filters['status'] === 'rejected' ? 'selected' : '' ?>>Rejected</option>
-                        </select>
+    
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="card stat-card border-success">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-muted mb-1">Ready to Send</h6>
+                        <h2 class="mb-0 text-success"><?= number_format($stats['ready_to_send']) ?></h2>
+                        <small class="text-muted">Approved by manager</small>
                     </div>
-                    
-                    <div class="col-md-3">
-                        <label class="form-label">Client</label>
-                        <select name="client_code" class="form-select">
-                            <option value="">All Clients</option>
-                            <?php foreach ($clients as $client): ?>
-                            <option value="<?= htmlspecialchars($client['client_code']) ?>"
-                                    <?= $filters['client_code'] === $client['client_code'] ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($client['company_name']) ?>
-                            </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    
-                    <div class="col-md-3">
-                        <label class="form-label">Recruiter</label>
-                        <select name="submitted_by" class="form-select">
-                            <option value="">All Recruiters</option>
-                            <?php foreach ($recruiters as $recruiter): ?>
-                            <option value="<?= htmlspecialchars($recruiter['user_code']) ?>"
-                                    <?= $filters['submitted_by'] === $recruiter['user_code'] ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($recruiter['name']) ?>
-                            </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    
-                    <div class="col-md-3">
-                        <label class="form-label">Search</label>
-                        <input type="text" name="search" class="form-control" 
-                               placeholder="Candidate, job, client..." 
-                               value="<?= htmlspecialchars($filters['search']) ?>">
+                    <div class="align-self-center">
+                        <i class="bx bx-check-circle display-4 text-success opacity-50"></i>
                     </div>
                 </div>
-                
-                <div class="mt-3">
-                    <button type="submit" class="btn btn-primary">
-                        <i class="bx bx-search me-1"></i> Apply
-                    </button>
-                    <a href="?action=list" class="btn btn-label-secondary">
-                        <i class="bx bx-reset me-1"></i> Clear
-                    </a>
-                </div>
-            </form>
+            </div>
         </div>
     </div>
-
-    <!-- Submissions Table -->
-    <div class="card">
-        <div class="card-body">
-            <?php if (empty($submissions)): ?>
-                <div class="text-center py-5">
-                    <i class="bx bx-inbox" style="font-size: 64px; color: #ddd;"></i>
-                    <h5 class="mt-3">No Submissions Found</h5>
-                    <p class="text-muted">
-                        <?php if (!empty(array_filter($filters))): ?>
-                            No submissions match your search criteria.
-                        <?php else: ?>
-                            Start submitting candidates to clients.
-                        <?php endif; ?>
-                    </p>
-                    <?php if (Permission::can('submissions', 'create')): ?>
-                    <a href="?action=create" class="btn btn-primary">
-                        <i class="bx bx-plus me-1"></i> Create First Submission
-                    </a>
-                    <?php endif; ?>
+    
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="card stat-card border-info">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-muted mb-1">With Client</h6>
+                        <h2 class="mb-0 text-info"><?= number_format($stats['with_client'] + $stats['interviewing']) ?></h2>
+                        <small class="text-muted">Submitted or interviewing</small>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="bx bx-send display-4 text-info opacity-50"></i>
+                    </div>
                 </div>
-            <?php else: ?>
-                <div class="table-responsive">
-                    <table class="table table-hover" id="submissionsTable">
-                        <thead>
-                            <tr>
-                                <th>Submission Code</th>
-                                <th>Candidate</th>
-                                <th>Job</th>
-                                <th>Client</th>
-                                <th>Submitted By</th>
-                                <th>Status</th>
-                                <th>Created</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($submissions as $sub): ?>
-                            <tr>
-                                <td>
-                                    <strong><?= htmlspecialchars($sub['submission_code']) ?></strong>
-                                </td>
-                                <td>
-                                    <div>
-                                        <strong><?= htmlspecialchars($sub['candidate_name']) ?></strong><br>
-                                        <small class="text-muted"><?= htmlspecialchars($sub['candidate_email']) ?></small>
-                                    </div>
-                                </td>
-                                <td><?= htmlspecialchars($sub['job_title']) ?></td>
-                                <td><?= htmlspecialchars($sub['client_name']) ?></td>
-                                <td><?= htmlspecialchars($sub['submitted_by_name']) ?></td>
-                                <td>
-                                    <?php
-                                    $statusColors = [
-                                        'draft' => 'secondary',
-                                        'pending_review' => 'warning',
-                                        'approved' => 'info',
-                                        'submitted' => 'primary',
-                                        'accepted' => 'success',
-                                        'rejected' => 'danger'
-                                    ];
-                                    $color = $statusColors[$sub['status']] ?? 'secondary';
-                                    ?>
-                                    <span class="badge bg-<?= $color ?>">
-                                        <?= ucwords(str_replace('_', ' ', $sub['status'])) ?>
-                                    </span>
-                                </td>
-                                <td><?= date('M d, Y', strtotime($sub['created_at'])) ?></td>
-                                <td>
-                                    <a href="?action=view&code=<?= urlencode($sub['submission_code']) ?>" 
-                                       class="btn btn-sm btn-info">
-                                        <i class="bx bx-show"></i> View
-                                    </a>
-                                </td>
-                            </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="card stat-card border-primary">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="text-muted mb-1">Placements</h6>
+                        <h2 class="mb-0 text-primary"><?= number_format($stats['placed']) ?></h2>
+                        <small class="text-muted">Successfully placed</small>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="bx bx-trophy display-4 text-primary opacity-50"></i>
+                    </div>
                 </div>
-            <?php endif; ?>
+            </div>
         </div>
     </div>
 </div>
 
-<link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/dataTables.bootstrap5.min.css">
-<script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
-<script src="https://cdn.datatables.net/1.13.7/js/dataTables.bootstrap5.min.js"></script>
+<!-- Filters -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0">
+            <i class="bx bx-filter"></i> Filters
+            <?php if (array_filter($filters)): ?>
+                <a href="list.php" class="btn btn-sm btn-outline-secondary float-end">
+                    <i class="bx bx-x"></i> Clear
+                </a>
+            <?php endif; ?>
+        </h5>
+    </div>
+    <div class="card-body filter-section">
+        <form method="GET" class="row g-3">
+            <div class="col-md-2">
+                <label class="form-label small">Internal Status</label>
+                <select name="internal_status" class="form-select form-select-sm">
+                    <option value="">All</option>
+                    <option value="pending" <?= $filters['internal_status'] === 'pending' ? 'selected' : '' ?>>Pending</option>
+                    <option value="approved" <?= $filters['internal_status'] === 'approved' ? 'selected' : '' ?>>Approved</option>
+                    <option value="rejected" <?= $filters['internal_status'] === 'rejected' ? 'selected' : '' ?>>Rejected</option>
+                    <option value="withdrawn" <?= $filters['internal_status'] === 'withdrawn' ? 'selected' : '' ?>>Withdrawn</option>
+                </select>
+            </div>
+            
+            <div class="col-md-2">
+                <label class="form-label small">Client Status</label>
+                <select name="client_status" class="form-select form-select-sm">
+                    <option value="">All</option>
+                    <option value="not_sent" <?= $filters['client_status'] === 'not_sent' ? 'selected' : '' ?>>Not Sent</option>
+                    <option value="submitted" <?= $filters['client_status'] === 'submitted' ? 'selected' : '' ?>>Submitted</option>
+                    <option value="interviewing" <?= $filters['client_status'] === 'interviewing' ? 'selected' : '' ?>>Interviewing</option>
+                    <option value="offered" <?= $filters['client_status'] === 'offered' ? 'selected' : '' ?>>Offered</option>
+                    <option value="placed" <?= $filters['client_status'] === 'placed' ? 'selected' : '' ?>>Placed</option>
+                    <option value="rejected" <?= $filters['client_status'] === 'rejected' ? 'selected' : '' ?>>Rejected</option>
+                </select>
+            </div>
+            
+            <div class="col-md-2">
+                <label class="form-label small">Candidate</label>
+                <input type="text" name="candidate" class="form-control form-control-sm" 
+                       value="<?= escape($filters['candidate']) ?>" placeholder="Name or email...">
+            </div>
+            
+            <div class="col-md-2">
+                <label class="form-label small">Job</label>
+                <input type="text" name="job" class="form-control form-control-sm" 
+                       value="<?= escape($filters['job']) ?>" placeholder="Job title...">
+            </div>
+            
+            <div class="col-md-2">
+                <label class="form-label small">Client</label>
+                <input type="text" name="client" class="form-control form-control-sm" 
+                       value="<?= escape($filters['client']) ?>" placeholder="Company...">
+            </div>
+            
+            <div class="col-md-2">
+                <label class="form-label small">Date From</label>
+                <input type="date" name="date_from" class="form-control form-control-sm" 
+                       value="<?= escape($filters['date_from']) ?>">
+            </div>
+            
+            <div class="col-md-2">
+                <label class="form-label small">Date To</label>
+                <input type="date" name="date_to" class="form-control form-control-sm" 
+                       value="<?= escape($filters['date_to']) ?>">
+            </div>
+            
+            <?php if ($canViewAll): ?>
+            <div class="col-md-2">
+                <label class="form-label small">Submitted By</label>
+                <select name="submitted_by" class="form-select form-select-sm">
+                    <option value="">All Recruiters</option>
+                    <?php foreach ($users as $u): ?>
+                        <option value="<?= $u['user_code'] ?>" <?= $filters['submitted_by'] === $u['user_code'] ? 'selected' : '' ?>>
+                            <?= escape($u['name']) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <?php endif; ?>
+            
+            <div class="col-md-2">
+                <label class="form-label small">&nbsp;</label>
+                <button type="submit" class="btn btn-primary btn-sm w-100">
+                    <i class="bx bx-search"></i> Apply Filters
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
 
-<script>
-$(document).ready(function() {
-    $('#submissionsTable').DataTable({
-        pageLength: 25,
-        order: [[6, 'desc']]
-    });
-    
-    $('#toggleFilters').on('click', function() {
-        $('#filterPanel').slideToggle();
-        $(this).find('i').toggleClass('bx-chevron-down bx-chevron-up');
-    });
-});
-</script>
+<!-- Submissions Table -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">
+            Submissions 
+            <span class="badge bg-secondary"><?= number_format($totalCount) ?> total</span>
+        </h5>
+        <?php if (Permission::can('submissions', 'approve')): ?>
+            <a href="approval-dashboard.php" class="btn btn-sm btn-warning">
+                <i class="bx bx-check-circle"></i> 
+                Pending Approvals 
+                <span class="badge bg-white text-warning"><?= $stats['pending_approval'] ?></span>
+            </a>
+        <?php endif; ?>
+    </div>
+    <div class="card-body p-0">
+        <?php if (empty($submissions)): ?>
+            <div class="text-center py-5">
+                <i class="bx bx-folder-open display-1 text-muted"></i>
+                <p class="text-muted mt-3">No submissions found</p>
+                <?php if (array_filter($filters)): ?>
+                    <a href="list.php" class="btn btn-sm btn-outline-primary">Clear Filters</a>
+                <?php endif; ?>
+            </div>
+        <?php else: ?>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Candidate</th>
+                            <th>Job</th>
+                            <th>Client</th>
+                            <th class="text-center">Internal</th>
+                            <th class="text-center">Client Status</th>
+                            <th>Timeline</th>
+                            <th>Recruiter</th>
+                            <th class="text-center">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($submissions as $sub): ?>
+                            <tr class="submission-row">
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <div class="avatar-sm rounded-circle bg-primary text-white d-flex align-items-center justify-content-center me-2">
+                                            <?= strtoupper(substr($sub['candidate_name'], 0, 1)) ?>
+                                        </div>
+                                        <div>
+                                            <strong><?= escape($sub['candidate_name']) ?></strong><br>
+                                            <small class="text-muted"><?= escape($sub['current_position'] ?: 'N/A') ?></small>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <strong><?= escape($sub['job_title']) ?></strong><br>
+                                    <small class="text-muted"><?= escape($sub['job_code']) ?></small>
+                                </td>
+                                <td>
+                                    <?= escape($sub['company_name']) ?>
+                                </td>
+                                <td class="text-center">
+                                    <?php
+                                    $internalBadgeClass = [
+                                        'pending' => 'warning',
+                                        'approved' => 'success',
+                                        'rejected' => 'danger',
+                                        'withdrawn' => 'secondary'
+                                    ];
+                                    $class = $internalBadgeClass[$sub['internal_status']] ?? 'secondary';
+                                    ?>
+                                    <span class="badge bg-<?= $class ?> status-badge">
+                                        <?= ucfirst($sub['internal_status']) ?>
+                                    </span>
+                                </td>
+                                <td class="text-center">
+                                    <?php
+                                    $clientBadgeClass = [
+                                        'not_sent' => 'secondary',
+                                        'submitted' => 'info',
+                                        'interviewing' => 'primary',
+                                        'offered' => 'warning',
+                                        'placed' => 'success',
+                                        'rejected' => 'danger',
+                                        'withdrawn' => 'secondary'
+                                    ];
+                                    $class = $clientBadgeClass[$sub['client_status']] ?? 'secondary';
+                                    $displayStatus = str_replace('_', ' ', $sub['client_status']);
+                                    ?>
+                                    <span class="badge bg-<?= $class ?> status-badge">
+                                        <?= ucfirst($displayStatus) ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <small>
+                                        <strong>Created:</strong> <?= date('M d, Y', strtotime($sub['created_at'])) ?><br>
+                                        <span class="text-muted"><?= $sub['days_pending'] ?> days ago</span>
+                                    </small>
+                                </td>
+                                <td>
+                                    <small><?= escape($sub['submitted_by_name']) ?></small>
+                                </td>
+                                <td class="text-center">
+                                    <a href="view.php?code=<?= escape($sub['submission_code']) ?>" 
+                                       class="btn btn-sm btn-outline-primary" title="View Details">
+                                        <i class="bx bx-show"></i>
+                                    </a>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Pagination -->
+            <?php if ($totalPages > 1): ?>
+                <div class="card-footer">
+                    <nav aria-label="Page navigation">
+                        <ul class="pagination pagination-sm mb-0 justify-content-center">
+                            <li class="page-item <?= $page <= 1 ? 'disabled' : '' ?>">
+                                <a class="page-link" href="?page=<?= $page - 1 ?>&<?= http_build_query($filters) ?>">Previous</a>
+                            </li>
+                            
+                            <?php for ($i = max(1, $page - 2); $i <= min($totalPages, $page + 2); $i++): ?>
+                                <li class="page-item <?= $i === $page ? 'active' : '' ?>">
+                                    <a class="page-link" href="?page=<?= $i ?>&<?= http_build_query($filters) ?>"><?= $i ?></a>
+                                </li>
+                            <?php endfor; ?>
+                            
+                            <li class="page-item <?= $page >= $totalPages ? 'disabled' : '' ?>">
+                                <a class="page-link" href="?page=<?= $page + 1 ?>&<?= http_build_query($filters) ?>">Next</a>
+                            </li>
+                        </ul>
+                    </nav>
+                    <p class="text-center text-muted small mt-2 mb-0">
+                        Showing <?= number_format($offset + 1) ?> to <?= number_format(min($offset + $perPage, $totalCount)) ?> of <?= number_format($totalCount) ?> submissions
+                    </p>
+                </div>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+</div>
+
+<?php require_once __DIR__ . '/../../includes/footer.php'; ?>

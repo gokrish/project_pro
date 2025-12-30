@@ -1,42 +1,39 @@
 <?php
 /**
- * Client Delete Handler (Soft Delete)
- * File: panel/modules/clients/handlers/delete.php
+ * Delete Client Handler (Soft Delete)
  */
-
 require_once __DIR__ . '/../../_common.php';
 
-header('Content-Type: application/json');
+use ProConsultancy\Core\Permission;
+use ProConsultancy\Core\Database;
+use ProConsultancy\Core\Auth;
+use ProConsultancy\Core\CSRFToken;
+use ProConsultancy\Core\Logger;
 
-if (!Auth::check()) {
-    echo json_encode(['success' => false, 'message' => 'Unauthorized']);
-    exit;
+Permission::require('clients', 'delete');
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    redirectBack('Invalid request method');
 }
 
-if (!Permission::can('clients', 'delete')) {
-    echo json_encode(['success' => false, 'message' => 'No permission']);
-    exit;
-}
-
-if (!CSRFToken::verify($_POST['csrf_token'] ?? '')) {
-    echo json_encode(['success' => false, 'message' => 'Invalid token']);
-    exit;
+if (!CSRFToken::verifyRequest()) {
+    redirectBack('Invalid security token');
 }
 
 try {
-    $db = Database::getInstance();
-    $conn = $db->getConnection();
+    $client_code = input('client_code');
     $user = Auth::user();
     
-    $clientCode = trim($_POST['client_code'] ?? '');
-    
-    if (empty($clientCode)) {
+    if (empty($client_code)) {
         throw new Exception('Client code is required');
     }
     
-    // Get client details
+    $db = Database::getInstance();
+    $conn = $db->getConnection();
+    
+    // Check client exists
     $stmt = $conn->prepare("SELECT * FROM clients WHERE client_code = ?");
-    $stmt->bind_param('s', $clientCode);
+    $stmt->bind_param("s", $client_code);
     $stmt->execute();
     $client = $stmt->get_result()->fetch_assoc();
     
@@ -46,47 +43,50 @@ try {
     
     // Check for active jobs
     $stmt = $conn->prepare("
-        SELECT COUNT(*) as count 
-        FROM jobs 
-        WHERE client_code = ? 
-        AND status = 'open' 
-        AND (deleted_at IS NULL OR deleted_at = '0000-00-00 00:00:00')
+        SELECT COUNT(*) as count FROM jobs 
+        WHERE client_code = ? AND status IN ('open', 'filling')
     ");
-    $stmt->bind_param('s', $clientCode);
+    $stmt->bind_param("s", $client_code);
     $stmt->execute();
     $activeJobs = $stmt->get_result()->fetch_assoc()['count'];
     
     if ($activeJobs > 0) {
-        throw new Exception("Cannot delete client with {$activeJobs} active job(s). Please close jobs first.");
+        throw new Exception("Cannot delete client with {$activeJobs} active job(s). Please close or delete jobs first.");
     }
     
-    // Soft delete: Set status to inactive
-    $stmt = $conn->prepare("UPDATE clients SET status = 'inactive', updated_at = NOW() WHERE client_code = ?");
-    $stmt->bind_param('s', $clientCode);
+    // Soft delete
+    $stmt = $conn->prepare("
+        UPDATE clients
+        SET deleted_at = NOW()
+        WHERE client_code = ?
+    ");
+    $stmt->bind_param("s", $client_code);
     
     if (!$stmt->execute()) {
-        throw new Exception('Failed to delete client');
+        throw new Exception('Failed to delete client: ' . $conn->error);
     }
     
     // Log activity
-    if (class_exists('Logger')) {
-        Logger::getInstance()->logActivity(
-            'delete',
-            'clients',
-            $clientCode,
-            "Deleted (deactivated) client: {$client['company_name']}"
-        );
-    }
+    Logger::getInstance()->logActivity(
+        'delete',
+        'clients',
+        $client_code,
+        "Client deleted: {$client['company_name']}",
+        ['deleted_by' => $user['user_code']]
+    );
     
-    echo json_encode([
-        'success' => true,
-        'message' => 'Client deactivated successfully'
-    ]);
+    redirectWithMessage(
+        "/panel/modules/clients/?action=list",
+        'Client deleted successfully',
+        'success'
+    );
     
 } catch (Exception $e) {
-    error_log('Client delete error: ' . $e->getMessage());
-    echo json_encode([
-        'success' => false,
-        'message' => $e->getMessage()
+    Logger::getInstance()->error('Client deletion failed', [
+        'error' => $e->getMessage(),
+        'client_code' => $client_code ?? null,
+        'user' => $user['user_code'] ?? null
     ]);
+    
+    redirectBack('Failed to delete client: ' . $e->getMessage());
 }
