@@ -96,7 +96,7 @@ class ApiResponse {
      */
     public static function serverError(string $message = 'Internal server error', $details = []): void {
         // Only include details in debug mode
-        $config = require __DIR__ . '/../../config/app.php';
+        $config = require __DIR__ . '/../config/app.php';
         if (!$config['app_debug']) {
             $details = [];
         }
@@ -169,7 +169,7 @@ class ApiResponse {
         header('Content-Type: application/json; charset=UTF-8');
         
         // Add CORS headers if needed
-        $config = require __DIR__ . '/../../config/app.php';
+        $config = require __DIR__ . '/../config/app.php';
         if ($config['api_cors_enabled'] ?? false) {
             header('Access-Control-Allow-Origin: ' . ($config['api_cors_origin'] ?? '*'));
             header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');

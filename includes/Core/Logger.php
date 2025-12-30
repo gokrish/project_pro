@@ -3,129 +3,101 @@ namespace ProConsultancy\Core;
 
 class Logger {
     private static $instance = null;
-    private $db;
+    private $db = null;
     
-    private function __construct() {
-        $this->db = Database::getInstance();
+    private function getDb(): ?Database {
+        if ($this->db === null) {
+            try {
+                $this->db = Database::getInstance();
+            } catch (\Throwable $e) {
+                error_log("Logger DB unavailable: " . $e->getMessage());
+                return null;
+            }
+        }
+        return $this->db;
     }
-    
+
     public static function getInstance() {
         if (self::$instance === null) {
             self::$instance = new self();
         }
         return self::$instance;
     }
-    
+
     /**
-     * Log activity to database
-     * 
-     * @param string $action Action type (create, update, delete, view, etc.)
-     * @param string $module Module name (candidates, jobs, users, etc.)
-     * @param string $recordId Related record identifier
-     * @param string $description Human-readable description
-     * @param array $details Additional metadata (old_value, new_value, etc.)
-     * @param string $level Severity level (info, warning, error, critical)
+     * Smart argument parser to support both:
+     * 1. Activity: ->info('users', 'login', '123', 'User logged in')
+     * 2. System:   ->info('PHP Error: message', ['file' => '...'])
      */
-    public function logActivity(
-        string $action,
-        string $module,
-        $recordId,
-        string $description,
-        array $details = [],
-        string $level = 'info'
-    ) {
-        try {
-            $conn = $this->db->getConnection();
-            
-            // Get user info
-            $user = Auth::check() ? Auth::user() : null;
-            $userCode = $user['user_code'] ?? null;
-            $userName = $user['name'] ?? null;
-            
-            // Get request context
-            $ipAddress = $_SERVER['REMOTE_ADDR'] ?? null;
-            $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? null;
-            $requestMethod = $_SERVER['REQUEST_METHOD'] ?? null;
-            $requestUri = $_SERVER['REQUEST_URI'] ?? null;
-            
-            // Prepare details JSON
-            $detailsJson = !empty($details) ? json_encode($details) : null;
-            
-            // Insert log
-            $stmt = $conn->prepare("
-                INSERT INTO activity_log (
-                    user_code,
-                    user_name,
-                    module,
-                    action,
-                    record_id,
-                    description,
-                    details,
-                    level,
-                    ip_address,
-                    user_agent,
-                    request_method,
-                    request_uri,
-                    created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-            ");
-            
-            $stmt->bind_param(
-                "ssssssssssss",
-                $userCode,
-                $userName,
-                $module,
-                $action,
-                $recordId,
-                $description,
-                $detailsJson,
-                $level,
-                $ipAddress,
-                $userAgent,
-                $requestMethod,
-                $requestUri
-            );
-            
-            $stmt->execute();
-            
-        } catch (\Exception $e) {
-            // Don't throw - logging should never break the app
-            error_log("Failed to log activity: " . $e->getMessage());
+    private function parseArgs(string $val1, $val2, array $rest): array {
+        if (is_array($val2)) {
+            return [
+                'module' => $val2['module'] ?? 'system',
+                'action' => $val2['action'] ?? 'log',
+                'recordId' => $val2['record_id'] ?? 'n/a',
+                'description' => $val1,
+                'details' => $val2
+            ];
         }
+        return [
+            'module' => $val1,
+            'action' => (string)$val2,
+            'recordId' => $rest[0] ?? 'n/a',
+            'description' => $rest[1] ?? '',
+            'details' => $rest[2] ?? []
+        ];
     }
-    
-    /**
-     * Log info level activity
-     */
-    public function info(string $module, string $action, string $recordId, string $description, array $details = []) {
-        $this->logActivity($action, $module, $recordId, $description, $details, 'info');
+
+    public function info(string $arg1, $arg2 = null, ...$rest) {
+        $p = $this->parseArgs($arg1, $arg2, $rest);
+        $this->logActivity($p['action'], $p['module'], $p['recordId'], $p['description'], $p['details'], 'info');
     }
-    
-    /**
-     * Log warning level activity
-     */
-    public function warning(string $module, string $action, string $recordId, string $description, array $details = []) {
-        $this->logActivity($action, $module, $recordId, $description, $details, 'warning');
+
+    public function warning(string $arg1, $arg2 = null, ...$rest) {
+        $p = $this->parseArgs($arg1, $arg2, $rest);
+        $this->logActivity($p['action'], $p['module'], $p['recordId'], $p['description'], $p['details'], 'warning');
     }
-    
-    /**
-     * Log error
-     */
+
     public function error(string $message, array $context = []) {
-        $this->logActivity(
-            'error',
-            $context['module'] ?? 'system',
-            $context['record_id'] ?? null,
-            $message,
-            $context,
-            'error'
-        );
+        $this->logActivity($context['action'] ?? 'error', $context['module'] ?? 'system', $context['record_id'] ?? 'n/a', $message, $context, 'error');
     }
-    
-    /**
-     * Log critical error
-     */
-    public function critical(string $module, string $action, string $recordId, string $description, array $details = []) {
-        $this->logActivity($action, $module, $recordId, $description, $details, 'critical');
+
+    public function critical(string $message, array $context = []): void {
+        $this->logActivity('critical', $context['module'] ?? 'system', $context['record_id'] ?? 'n/a', $message, $context, 'critical');
     }
+
+       public function logActivity(string $action, string $module, $recordId, string $description, array $details = [], string $level = 'info') {
+    // Flag to prevent recursion
+    static $isLogging = false;
+    if ($isLogging) return;
+    $isLogging = true;
+
+    try {
+        $db = $this->getDb();
+        if (!$db) {
+            $isLogging = false;
+            return;
+        }
+        $conn = $db->getConnection();
+        
+        // Use session directly to avoid Auth::check() recursion
+        $userId = $_SESSION['user_id'] ?? null;
+        
+        $detailsJson = !empty($details) ? json_encode($details) : null;
+        $ip = $_SERVER['REMOTE_ADDR'] ?? null;
+        $ua = substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255);
+
+        $stmt = $conn->prepare("INSERT INTO activity_log (user_id, action, entity_type, entity_id, description, details, level, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        
+        if ($stmt) {
+            $stmt->bind_param("issssssss", $userId, $action, $module, $recordId, $description, $detailsJson, $level, $ip, $ua);
+            $stmt->execute();
+            $stmt->close();
+        }
+    } catch (\Throwable $e) {
+        error_log("Logging failed: " . $e->getMessage());
+    } finally {
+        $isLogging = false;
+    }
+}
 }

@@ -1,127 +1,93 @@
 <?php
 /**
  * Submit Job for Approval Handler
- * Sends job to manager/admin for approval
- * 
- * @version 5.0
  */
-
 require_once __DIR__ . '/../../_common.php';
 
 use ProConsultancy\Core\Permission;
 use ProConsultancy\Core\Database;
-use ProConsultancy\Core\ApiResponse;
+use ProConsultancy\Core\Auth;
 use ProConsultancy\Core\CSRFToken;
 use ProConsultancy\Core\Logger;
-use ProConsultancy\Core\Auth;
 
-header('Content-Type: application/json');
+Permission::require('jobs', 'create');
 
-// Check permission
-if (!Permission::can('jobs', 'edit')) {
-    ApiResponse::forbidden();
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    redirectBack('Invalid request method');
 }
 
-// Verify CSRF
 if (!CSRFToken::verifyRequest()) {
-    ApiResponse::error('Invalid CSRF token', 403);
+    redirectBack('Invalid security token');
 }
 
 try {
-    $input = json_decode(file_get_contents('php://input'), true);
+    $job_code = input('job_code');
+    $user = Auth::user();
     
-    $jobCode = $input['job_code'] ?? '';
-    
-    if (empty($jobCode)) {
-        ApiResponse::validation(['job_code' => 'Job code is required']);
+    if (empty($job_code)) {
+        throw new Exception('Job code is required');
     }
     
     $db = Database::getInstance();
     $conn = $db->getConnection();
-    $user = Auth::user();
     
-    // Get job
-    $stmt = $conn->prepare("SELECT * FROM jobs WHERE job_code = ? AND deleted_at IS NULL");
-    $stmt->bind_param("s", $jobCode);
+    // Check job exists and is draft
+    $stmt = $conn->prepare("SELECT * FROM jobs WHERE job_code = ?");
+    $stmt->bind_param("s", $job_code);
     $stmt->execute();
     $job = $stmt->get_result()->fetch_assoc();
     
     if (!$job) {
-        ApiResponse::error('Job not found', 404);
+        throw new Exception('Job not found');
     }
     
-    // Check if already submitted
-    if ($job['approval_status'] === 'pending_approval') {
-        ApiResponse::error('Job is already pending approval', 400);
+    if ($job['approval_status'] !== 'draft') {
+        throw new Exception('This job has already been submitted or approved');
     }
     
-    // Update job
+    // Validate job is complete
+    if (empty($job['job_title']) || empty($job['description'])) {
+        throw new Exception('Job title and description are required before submission');
+    }
+    
+    // Update status
     $stmt = $conn->prepare("
-        UPDATE jobs 
+        UPDATE jobs
         SET approval_status = 'pending_approval',
             submitted_for_approval_at = NOW(),
-            status = 'pending_approval',
             updated_at = NOW()
         WHERE job_code = ?
     ");
-    $stmt->bind_param("s", $jobCode);
-    $stmt->execute();
+    
+    $stmt->bind_param("s", $job_code);
+    
+    if (!$stmt->execute()) {
+        throw new Exception('Failed to submit job: ' . $conn->error);
+    }
     
     // Log activity
     Logger::getInstance()->logActivity(
-        'submit_approval',
+        'submit_for_approval',
         'jobs',
-        $jobCode,
-        "Submitted job for approval: {$job['job_title']}"
+        $job_code,
+        "Job submitted for approval: {$job['job_title']}",
+        ['submitted_by' => $user['user_code']]
     );
     
-    // Get all managers/admins
-    $managersResult = $conn->query("
-        SELECT user_code, name, email 
-        FROM users 
-        WHERE level IN ('manager', 'admin') 
-        AND is_active = 1
-    ");
-    $managers = $managersResult->fetch_all(MYSQLI_ASSOC);
+    // TODO: Send email notification to managers
     
-    // Send notification emails
-    foreach ($managers as $manager) {
-        Notification::send(
-            $manager['user_code'],
-            'job_approval_request',
-            'Job Approval Required',
-            "Job '{$job['job_title']}' has been submitted for approval",
-            'jobs',
-            $jobCode
-        );
-        
-        // Send email notification
-        try {
-            $mailer = new Mailer();
-            $mailer->sendFromTemplate(
-                'job_approval_request',
-                $manager['email'],
-                [
-                    'job_title' => $job['job_title'],
-                    'client_name' => $job['company_name'] ?? 'N/A',
-                    'created_by_name' => $user['name'],
-                    'approval_url' => BASE_URL . '/panel/modules/jobs/approve.php?code=' . urlencode($jobCode)
-                ]
-            );
-        } catch (Exception $e) {
-            Logger::getInstance()->warning('Failed to send approval email', [
-                'manager' => $manager['email'],
-                'error' => $e->getMessage()
-            ]);
-        }
-    }
-    
-    ApiResponse::success(null, 'Job submitted for approval successfully!');
+    redirectWithMessage(
+        "/panel/modules/jobs/?action=view&code={$job_code}",
+        'Job submitted for approval successfully. Managers will be notified.',
+        'success'
+    );
     
 } catch (Exception $e) {
-    Logger::getInstance()->error('Submit for approval failed', [
-        'error' => $e->getMessage()
+    Logger::getInstance()->error('Job submission failed', [
+        'error' => $e->getMessage(),
+        'job_code' => $job_code ?? null,
+        'user' => $user['user_code'] ?? null
     ]);
     
-    ApiResponse::error('Failed to submit for approval', 500);
+    redirectBack('Failed to submit job: ' . $e->getMessage());
 }

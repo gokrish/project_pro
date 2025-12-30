@@ -1,98 +1,95 @@
 <?php
 /**
  * Create Job Handler
+ * Handles both "save as draft" and "submit for approval"
  */
-
 require_once __DIR__ . '/../../_common.php';
 
 use ProConsultancy\Core\Permission;
 use ProConsultancy\Core\Database;
+use ProConsultancy\Core\Auth;
 use ProConsultancy\Core\CSRFToken;
 use ProConsultancy\Core\Logger;
 
 Permission::require('jobs', 'create');
 
-if (!CSRFToken::verify($_POST['csrf_token'] ?? '')) {
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    redirectBack('Invalid request method');
+}
+
+if (!CSRFToken::verifyRequest()) {
     redirectBack('Invalid security token');
 }
 
-$db = Database::getInstance();
-$conn = $db->getConnection();
-
 try {
-    $db->beginTransaction();
+    $job_code = input('job_code');
+    $client_code = input('client_code');
+    $job_title = input('job_title');
+    $description = input('description');
+    $location = input('location', 'Remote');
+    $salary_min = input('salary_min') ?: null;
+    $salary_max = input('salary_max') ?: null;
+    $show_salary = input('show_salary', 0) ? 1 : 0;
+    $positions_total = inputInt('positions_total', 1);
+    $assigned_recruiter = input('assigned_recruiter', '');
+    $notes = input('notes', '');
+    $action = input('action', 'save_draft'); // save_draft or submit_approval
     
-    // Get form data
-    $jobCode = $_POST['job_code'] ?? null;
-    $jobTitle = trim($_POST['job_title'] ?? '');
-    $clientCode = $_POST['client_code'] ?? null;
-    $description = trim($_POST['description'] ?? '');
-    $assignedTo = $_POST['assigned_to'] ?? Auth::userCode();
-    $internalNotes = trim($_POST['internal_notes'] ?? '');
-    
-    // Optional fields
-    $salaryMin = !empty($_POST['salary_min']) ? (float)$_POST['salary_min'] : null;
-    $salaryMax = !empty($_POST['salary_max']) ? (float)$_POST['salary_max'] : null;
+    $user = Auth::user();
     
     // Validation
-    if (empty($jobTitle)) throw new Exception('Job title is required');
-    if (empty($clientCode)) throw new Exception('Client is required');
-    if (empty($description)) throw new Exception('Job description is required');
+    if (empty($job_code) || empty($client_code) || empty($job_title) || empty($description)) {
+        throw new Exception('Job code, client, title, and description are required');
+    }
     
-    // Determine status based on action
-    $action = $_POST['action'] ?? 'save_draft';
-    $status = ($action === 'publish') ? 'open' : 'draft';
-    $isPublished = ($action === 'publish') ? 1 : 0;
-    $publishedAt = $isPublished ? date('Y-m-d H:i:s') : null;
+    if ($positions_total < 1) {
+        throw new Exception('Number of positions must be at least 1');
+    }
+    
+    $db = Database::getInstance();
+    $conn = $db->getConnection();
+    
+    // Check for duplicate job_code
+    $stmt = $conn->prepare("SELECT id FROM jobs WHERE job_code = ?");
+    $stmt->bind_param("s", $job_code);
+    $stmt->execute();
+    
+    if ($stmt->get_result()->num_rows > 0) {
+        throw new Exception('A job with this code already exists');
+    }
+    
+    // Determine initial status based on action
+    if ($action === 'submit_approval') {
+        $status = 'pending_approval';
+        $approval_status = 'pending_approval';
+        $submitted_for_approval_at = date('Y-m-d H:i:s');
+    } else {
+        $status = 'draft';
+        $approval_status = 'draft';
+        $submitted_for_approval_at = null;
+    }
     
     // Insert job
     $stmt = $conn->prepare("
         INSERT INTO jobs (
-            job_code,
-            client_code,
-            job_title,
-            description,
-            salary_min,
-            salary_max,
-            status,
-            assigned_to,
-            is_published,
-            published_at,
-            created_by,
-            created_at,
-            updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+            job_code, client_code, job_title, description, notes,
+            location, salary_min, salary_max, show_salary,
+            status, approval_status, submitted_for_approval_at,
+            positions_total, assigned_recruiter,
+            created_by, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     ");
     
-    $createdBy = Auth::user();
-    
-    $stmt->bind_param(
-        "ssssddssiss",
-        $jobCode,
-        $clientCode,
-        $jobTitle,
-        $description,
-        $salaryMin,
-        $salaryMax,
-        $status,
-        $assignedTo,
-        $isPublished,
-        $publishedAt,
-        $createdBy
+    $stmt->bind_param("ssssssddssssiss",
+        $job_code, $client_code, $job_title, $description, $notes,
+        $location, $salary_min, $salary_max, $show_salary,
+        $status, $approval_status, $submitted_for_approval_at,
+        $positions_total, $assigned_recruiter,
+        $user['user_code']
     );
     
     if (!$stmt->execute()) {
-        throw new Exception('Failed to create job: ' . $stmt->error);
-    }
-    
-    // Add internal notes if provided
-    if (!empty($internalNotes)) {
-        $noteStmt = $conn->prepare("
-            INSERT INTO job_notes (job_code, note, note_type, is_internal, created_by, created_at)
-            VALUES (?, ?, 'internal', 1, ?, NOW())
-        ");
-        $noteStmt->bind_param("sss", $jobCode, $internalNotes, $createdBy);
-        $noteStmt->execute();
+        throw new Exception('Failed to create job: ' . $conn->error);
     }
     
     // Log activity
@@ -100,20 +97,31 @@ try {
         'create',
         'jobs',
         $job_code,
-        "Job created: {$job_title} for client {$client_name}",
-        ['client' => $client_code, 'created_by' => $user['user_code']]
+        "Job created: {$job_title}" . ($action === 'submit_approval' ? ' and submitted for approval' : ''),
+        [
+            'job_title' => $job_title,
+            'client_code' => $client_code,
+            'status' => $status,
+            'action' => $action,
+            'created_by' => $user['user_code']
+        ]
     );
     
-    $db->commit();
+    $message = $action === 'submit_approval' 
+        ? 'Job created and submitted for approval successfully' 
+        : 'Job saved as draft successfully';
     
-    $message = $isPublished ? 'Job created and published!' : 'Job saved as draft!';
-    redirectWithMessage("/panel/modules/jobs/view.php?code={$jobCode}", $message, 'success');
+    redirectWithMessage(
+        "/panel/modules/jobs/?action=view&code={$job_code}",
+        $message,
+        'success'
+    );
     
 } catch (Exception $e) {
-    $db->rollback();
-    
     Logger::getInstance()->error('Job creation failed', [
-        'error' => $e->getMessage()
+        'error' => $e->getMessage(),
+        'job_code' => $job_code ?? null,
+        'user' => $user['user_code'] ?? null
     ]);
     
     redirectBack('Failed to create job: ' . $e->getMessage());

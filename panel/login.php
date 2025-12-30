@@ -7,8 +7,8 @@
  */
 
 require_once __DIR__ . '/../includes/config/app.php';
-require_once __DIR__ . '/../includes/Core/Database.php';
 require_once __DIR__ . '/../includes/Core/Logger.php';
+require_once __DIR__ . '/../includes/Core/Database.php';
 require_once __DIR__ . '/../includes/Core/ErrorHandler.php';
 require_once __DIR__ . '/../includes/Core/Session.php';
 require_once __DIR__ . '/../includes/Core/Auth.php';
@@ -19,8 +19,6 @@ require_once __DIR__ . '/../includes/Core/FlashMessage.php';
 use ProConsultancy\Core\Session;
 use ProConsultancy\Core\Auth;
 use ProConsultancy\Core\CSRFToken;
-use ProConsultancy\Core\Validator;
-use ProConsultancy\Core\Logger;
 
 Session::start();
 
@@ -35,51 +33,40 @@ $error = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
-        // CSRF validation
+        // 1. Verify CSRF
         if (!CSRFToken::verifyRequest()) {
-            throw new Exception('Invalid request. Please try again.');
+            throw new Exception('Invalid session. Please refresh and try again.');
         }
         
-        // Validate input
-        $validator = new Validator($_POST);
-        if (!$validator->validate([
-            'identifier' => 'required',
-            'password' => 'required'
-        ])) {
-            $errors = $validator->errors();
-            $error = $errors['identifier'][0] ?? $errors['password'][0] ?? 'Please fill in all fields';
+        $identifier = trim($_POST['identifier'] ?? '');
+        $password = $_POST['password'] ?? '';
+        $remember = isset($_POST['remember']);
+        
+        // 2. Attempt Login
+        if (Auth::attempt($identifier, $password, $remember)) {
+            echo "<h3>Auth logging</h3>";
+            
+            // SUCCESS: Redirect to dashboard
+            header('Location: /panel/dashboard.php');
+            console_log("Checking Auth loggin: " . $error);
+            exit;
         } else {
-            $identifier = trim($_POST['identifier']);
-            $password = $_POST['password'];
-            $remember = isset($_POST['remember']);
-            
-            Logger::getInstance()->info('Login attempt', [
-                'identifier' => $identifier,
-                'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
-            ]);
-            
-            // Attempt login
-            if (Auth::attempt($identifier, $password, $remember)) {
-                // Get intended URL or default to dashboard
-                $redirectUrl = Session::get('intended_url', '/panel/dashboard.php');
-                Session::remove('intended_url');
-                
-                header('Location: ' . $redirectUrl);
-                exit;
-            } else {
-                // Check for specific error message from Auth
-                $error = Session::get('login_error') ?? 'Invalid email/user code or password';
-                Session::remove('login_error');
-            }
+            // FAILURE: Set error and REDIRECT back to login
+            Session::set('login_error', 'Invalid email/user code or password');
+            header('Location: login.php'); // This clears the POST data!
+            exit;
         }
     } catch (Exception $e) {
-        Logger::getInstance()->error('Login error', [
-            'error' => $e->getMessage(),
-            'trace' => $e->getTraceAsString()
-        ]);
-        $error = 'An error occurred. Please try again.';
+        Session::set('login_error', $e->getMessage());
+        header('Location: login.php');
+        exit;
     }
 }
+
+// 3. Get and immediately CLEAR the error (so it won't show on refresh)
+$error = Session::get('login_error');
+Session::remove('login_error');
+
 ?>
 <!DOCTYPE html>
 <html lang="en">

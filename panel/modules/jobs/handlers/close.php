@@ -1,120 +1,89 @@
 <?php
 /**
  * Close Job Handler
- * Closes job with reason tracking
- * 
- * @version 5.0
+ * Closes job and unpublishes from website
  */
-
 require_once __DIR__ . '/../../_common.php';
 
 use ProConsultancy\Core\Permission;
 use ProConsultancy\Core\Database;
-use ProConsultancy\Core\ApiResponse;
+use ProConsultancy\Core\Auth;
 use ProConsultancy\Core\CSRFToken;
+use ProConsultancy\Core\Logger;
 
-header('Content-Type: application/json');
+Permission::require('jobs', 'edit');
 
-// Check permission
-if (!Permission::can('jobs', 'edit')) {
-    echo ApiResponse::forbidden();
-    exit;
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    redirectBack('Invalid request method');
 }
 
-// Verify CSRF
 if (!CSRFToken::verifyRequest()) {
-    echo ApiResponse::error('Invalid CSRF token', 403);
-    exit;
+    redirectBack('Invalid security token');
 }
 
 try {
-    $input = json_decode(file_get_contents('php://input'), true);
+    $job_code = input('job_code');
+    $user = Auth::user();
     
-    $jobCode = $input['job_code'] ?? '';
-    $closeReason = $input['close_reason'] ?? '';
-    $closeNotes = $input['close_notes'] ?? '';
-    
-    if (empty($jobCode)) {
-        echo ApiResponse::validationError(['job_code' => 'Job code is required']);
-        exit;
-    }
-    
-    if (empty($closeReason)) {
-        echo ApiResponse::validationError(['close_reason' => 'Please select a reason']);
-        exit;
+    if (empty($job_code)) {
+        throw new Exception('Job code is required');
     }
     
     $db = Database::getInstance();
     $conn = $db->getConnection();
-    $user = Auth::user();
     
-    // Get job
+    // Check job exists
     $stmt = $conn->prepare("SELECT * FROM jobs WHERE job_code = ?");
-    $stmt->bind_param("s", $jobCode);
+    $stmt->bind_param("s", $job_code);
     $stmt->execute();
     $job = $stmt->get_result()->fetch_assoc();
     
     if (!$job) {
-        echo ApiResponse::error('Job not found', 404);
-        exit;
+        throw new Exception('Job not found');
     }
     
-    // Update job
+    if ($job['status'] === 'closed') {
+        throw new Exception('Job is already closed');
+    }
+    
+    // Close job
     $stmt = $conn->prepare("
-        UPDATE jobs 
+        UPDATE jobs
         SET status = 'closed',
-            accept_applications = 0,
+            is_published = 0,
+            closed_at = NOW(),
+            closed_by = ?,
             updated_at = NOW()
         WHERE job_code = ?
     ");
-    $stmt->bind_param("s", $jobCode);
-    $stmt->execute();
     
-    // Add close reason to internal notes
-    $reasonText = ucwords(str_replace('_', ' ', $closeReason));
-    $closeNote = "\n\n--- Job Closed ---\nDate: " . date('Y-m-d H:i:s') . 
-                 "\nReason: {$reasonText}" .
-                 ($closeNotes ? "\nNotes: {$closeNotes}" : "") .
-                 "\nClosed by: {$user['name']}";
+    $stmt->bind_param("ss", $user['user_code'], $job_code);
     
-    $stmt = $conn->prepare("
-        UPDATE jobs 
-        SET internal_notes = CONCAT(COALESCE(internal_notes, ''), ?)
-        WHERE job_code = ?
-    ");
-    $stmt->bind_param("ss", $closeNote, $jobCode);
-    $stmt->execute();
+    if (!$stmt->execute()) {
+        throw new Exception('Failed to close job: ' . $conn->error);
+    }
     
     // Log activity
     Logger::getInstance()->logActivity(
         'close',
         'jobs',
-        $jobCode,
-        "Closed job: {$job['job_title']}",
-        [
-            'reason' => $closeReason,
-            'notes' => $closeNotes
-        ]
+        $job_code,
+        "Job closed: {$job['job_title']}",
+        ['closed_by' => $user['user_code']]
     );
     
-    // Notify assigned recruiter
-    if ($job['assigned_to']) {
-        Notification::send(
-            $job['assigned_to'],
-            'job_closed',
-            'Job Closed',
-            "Job '{$job['job_title']}' has been closed",
-            'jobs',
-            $jobCode
-        );
-    }
-    
-    echo ApiResponse::success(null, 'Job closed successfully!');
+    redirectWithMessage(
+        "/panel/modules/jobs/?action=view&code={$job_code}",
+        'Job closed successfully',
+        'success'
+    );
     
 } catch (Exception $e) {
-    Logger::getInstance()->error('Close job failed', [
-        'error' => $e->getMessage()
+    Logger::getInstance()->error('Job closure failed', [
+        'error' => $e->getMessage(),
+        'job_code' => $job_code ?? null,
+        'user' => $user['user_code'] ?? null
     ]);
     
-    echo ApiResponse::error('Failed to close job', 500);
+    redirectBack('Failed to close job: ' . $e->getMessage());
 }

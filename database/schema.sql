@@ -237,13 +237,10 @@ CREATE TABLE `users` (
     `user_code` VARCHAR(50) UNIQUE NOT NULL,
     `role_id` INT UNSIGNED NULL,
     `name` VARCHAR(255) NOT NULL,
-    `full_name` VARCHAR(255) NOT NULL,
     `email` VARCHAR(255) UNIQUE NOT NULL,
     `password` VARCHAR(255) NOT NULL,
-    `level` ENUM('super_admin', 'admin', 'manager', 'senior_recruiter', 'recruiter', 'coordinator') DEFAULT 'recruiter' COMMENT 'Backward compatibility',
+    `level` ENUM('super_admin', 'admin', 'manager', 'senior_recruiter', 'recruiter', 'user') DEFAULT 'recruiter' COMMENT 'Backward compatibility',
     `phone` VARCHAR(20),
-    `department` VARCHAR(100),
-    `position` VARCHAR(100),
     `is_active` BOOLEAN DEFAULT 1,
     `last_login` TIMESTAMP NULL,
     `failed_login_attempts` INT DEFAULT 0,
@@ -349,7 +346,7 @@ CREATE TABLE `clients` (
     `email` VARCHAR(255),
     `phone` VARCHAR(20),
     `status` ENUM('active', 'inactive') DEFAULT 'active',
-    'account_manager' VARCHAR(255),
+    `account_manager` VARCHAR(255),
     `notes` TEXT,
     
     -- Activity counters (auto-updated)
@@ -539,58 +536,78 @@ COMMENT='Simplified submissions - NO payment fields, notes only for tracking';
 -- ============================================================================
 
 -- Contacts (Lead management)
-CREATE TABLE `contacts` (
+CREATE TABLE IF NOT EXISTS `contacts` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `contact_code` VARCHAR(50) UNIQUE NOT NULL,
-    `contact_name` VARCHAR(255) NOT NULL,
-    `email` VARCHAR(255),
-    `phone` VARCHAR(20),
-    `company` VARCHAR(255),
-    `status` ENUM('new', 'contacted', 'qualified', 'converted', 'rejected') DEFAULT 'new',
-    `source` VARCHAR(255),
-    `notes` TEXT,
-    `converted_to_candidate_code` VARCHAR(50) NULL,
-    `conversion_date` TIMESTAMP NULL,
-    `assigned_to` VARCHAR(50),
-    `created_by` VARCHAR(50),
+    `name` VARCHAR(255) NOT NULL,
+    `email` VARCHAR(255) NOT NULL,
+    `phone` VARCHAR(50) NULL,
+    `company` VARCHAR(255) NULL,
+    `position` VARCHAR(255) NULL,
+    `source` VARCHAR(100) NULL,
+    `status` ENUM('new', 'contacted', 'qualified', 'nurturing', 'converted', 'not_interested', 'unresponsive') DEFAULT 'new',
+    `next_follow_up` DATE NULL,
+    `notes` TEXT NULL,
+    `assigned_to` VARCHAR(50) NULL,
+    `created_by` VARCHAR(50) NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `deleted_at` TIMESTAMP NULL,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`user_code`) ON DELETE RESTRICT,
+    FOREIGN KEY (`assigned_to`) REFERENCES `users`(`user_code`) ON DELETE SET NULL,
     INDEX `idx_code` (`contact_code`),
     INDEX `idx_status` (`status`),
     INDEX `idx_assigned` (`assigned_to`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- CV Inbox
-CREATE TABLE `cv_inbox` (
+CREATE TABLE IF NOT EXISTS `cv_inbox` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    `inbox_code` VARCHAR(50) UNIQUE NOT NULL,
-    `candidate_name` VARCHAR(255),
-    `email` VARCHAR(255),
-    `phone` VARCHAR(20),
-    `resume_filename` VARCHAR(255) NOT NULL,
-    `resume_path` VARCHAR(255) NOT NULL,
-    `status` ENUM('pending', 'processed', 'converted', 'rejected') DEFAULT 'pending',
-    `source` VARCHAR(255),
-    `processed_by` VARCHAR(50),
-    `processed_date` TIMESTAMP NULL,
-    `converted_to_candidate_code` VARCHAR(50) NULL,
-    `assigned_to` VARCHAR(50),
-    `notes` TEXT,
+    `cv_code` VARCHAR(50) UNIQUE NOT NULL,
+    `name` VARCHAR(255) NOT NULL,
+    `email` VARCHAR(255) NOT NULL,
+    `phone` VARCHAR(50) NULL,
+    `cv_path` VARCHAR(500) NULL,
+    `source` VARCHAR(100) NULL,
+    `status` ENUM('new', 'reviewed', 'shortlisted', 'converted', 'rejected') DEFAULT 'new',
+    `notes` TEXT NULL,
+    `reviewed_by` VARCHAR(50) NULL,
+    `reviewed_at` TIMESTAMP NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    INDEX `idx_status` (`status`),
-    INDEX `idx_assigned` (`assigned_to`)
+    `deleted_at` TIMESTAMP NULL,
+    INDEX `idx_code` (`cv_code`),
+    INDEX `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Website Queries (for future implementation)
+
+CREATE TABLE IF NOT EXISTS `queries` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `query_code` VARCHAR(50) UNIQUE NOT NULL,
+    `name` VARCHAR(255) NOT NULL,
+    `email` VARCHAR(255) NOT NULL,
+    `phone` VARCHAR(50) NULL,
+    `message` TEXT NOT NULL,
+    `type` VARCHAR(50) NULL,
+    `status` ENUM('new', 'in_progress', 'responded', 'closed') DEFAULT 'new',
+    `submission_date` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `handled_by` VARCHAR(50) NULL,
+    `handled_at` TIMESTAMP NULL,
+    INDEX `idx_code` (`query_code`),
+    INDEX `idx_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 
 -- Activity Log
 CREATE TABLE `activity_log` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    `user_id` INT UNSIGNED,
+    `user_id` INT UNSIGNED NULL,
     `action` VARCHAR(100) NOT NULL,
     `entity_type` VARCHAR(50) NOT NULL,
     `entity_id` VARCHAR(50) NOT NULL,
     `description` TEXT,
-    `old_values` JSON,
-    `new_values` JSON,
+    `details` JSON,
+    `level` VARCHAR(20) DEFAULT 'info',
     `ip_address` VARCHAR(45),
     `user_agent` VARCHAR(255),
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -598,7 +615,7 @@ CREATE TABLE `activity_log` (
     INDEX `idx_user` (`user_id`),
     INDEX `idx_entity` (`entity_type`, `entity_id`),
     INDEX `idx_created` (`created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Notes (Universal)
 CREATE TABLE `notes` (
@@ -702,6 +719,14 @@ CREATE TABLE `email_templates` (
     INDEX `idx_active` (`is_active`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Admin user (password: password)
+INSERT INTO `users` (`user_code`, `name`, `email`, `password`, `level`, `is_active`) VALUES
+('ADMIN001', 'Admin User', 'admin@test.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin', 1);
+INSERT INTO `users` (`user_code`, `name`, `email`, `password`, `level`, `is_active`) VALUES
+('ADM01', 'Admin User', 'admin1@test.com', 'admin123', 'admin', 1);
+
+INSERT INTO `users` (`user_code`, `name`, `email`, `password`, `level`, `is_active`) VALUES
+('USR01', 'Team User', 'user@test.com', 'user123', 'user', 1);
 -- ============================================================================
 -- SECTION 7: AUTO-UPDATE TRIGGERS
 -- ============================================================================

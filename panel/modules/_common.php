@@ -80,13 +80,19 @@ $user = Auth::user();
 
 // If not authenticated and not on login page, redirect
 $currentPage = basename($_SERVER['PHP_SELF']);
-$allowedPages = ['login.php', 'register.php', 'forgot-password.php', 'reset-password.php'];
+$allowedPages = ['login.php',  'forgot-password.php', 'reset-password.php'];
 
 if (!$user && !in_array($currentPage, $allowedPages)) {
     // Store intended URL
     $_SESSION['intended_url'] = $_SERVER['REQUEST_URI'];
-    header('Location: ' . BASE_URL . '/panel/login.php');
+    header('Location: ' . '/panel/login.php');
     exit();
+}
+// for console test need to remove later
+function console_log($data) {
+    // This converts arrays/objects to strings safely for Javascript
+    $json = json_encode($data, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    echo "<script>console.log('PHP Debug: " . $json . "');</script>";
 }
 
 // Global exception handler for PermissionException

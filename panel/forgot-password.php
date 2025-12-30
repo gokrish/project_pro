@@ -6,7 +6,7 @@
  * @version 5.0
  */
 
-require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/../includes/config/app.php';
 require_once __DIR__ . '/../includes/Core/Database.php';
 require_once __DIR__ . '/../includes/Core/Logger.php';
 require_once __DIR__ . '/../includes/Core/Session.php';

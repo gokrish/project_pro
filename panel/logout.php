@@ -7,9 +7,9 @@
  */
 
 require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/../includes/Core/Logger.php';
 require_once __DIR__ . '/../includes/Core/Session.php';
 require_once __DIR__ . '/../includes/Core/Auth.php';
-require_once __DIR__ . '/../includes/Core/Logger.php';
 
 use ProConsultancy\Core\Session;
 use ProConsultancy\Core\Auth;

@@ -8,7 +8,7 @@ return [
     'driver' => 'mysql',
     'host' => getenv('DB_HOST') ?: 'localhost',
     'port' => getenv('DB_PORT') ?: '3306',
-    'database' => getenv('DB_NAME') ?: 'proconsultancy_db',
+    'database' => getenv('DB_NAME') ?: 'proconsultancy',
     'username' => getenv('DB_USER') ?: 'root',
     'password' => getenv('DB_PASS') ?: 'Test@123',
     'charset' => 'utf8mb4',
