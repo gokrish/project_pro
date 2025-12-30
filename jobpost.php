@@ -1,0 +1,358 @@
+<?php
+if (isset($_GET['ref_no'])) {
+    include("panel/db_conn.php");
+    $sql = "SELECT * FROM jobs,user where jobs.created_by=user.user_code and jobs.job_refno ='".$_GET['ref_no']."'";
+    $stmt = $conn->prepare($sql);
+   
+    $stmt->execute();
+
+    // Fetch the data
+    $result = $stmt->get_result();
+    // Check if there are any rows returned
+    if ($result->num_rows > 0) {
+        // Fetch and display the data
+        $row = $result->fetch_assoc(); 
+        //echo $row["name"]; 
+        
+   
+
+?>
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <title>Job Opportunities at test consultancy - Current Openings</title>
+    <meta name="keywords" content="Job Opportunities, Current Openings, Career at test consultancy, Employment, Job Listings">
+    <meta name="description" content="Explore job opportunities at test consultancy. View our current openings and join our team for a rewarding career. Find the perfect employment opportunity that suits your skills and aspirations.">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+   
+    <!-- Favicon -->
+    <link href="img/favicon.ico" rel="icon">
+
+    <!-- Google Web Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Icon Font Stylesheet -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.10.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.4.1/font/bootstrap-icons.css" rel="stylesheet">
+
+    <!-- Libraries Stylesheet -->
+    <link href="lib/owlcarousel/assets/owl.carousel.min.css" rel="stylesheet">
+    <link href="lib/animate/animate.min.css" rel="stylesheet">
+
+    <!-- Customized Bootstrap Stylesheet -->
+    <link href="css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Template Stylesheet -->
+    <link href="css/style.css" rel="stylesheet">
+</head>
+
+<body>
+    <!-- Spinner Start -->
+    <div id="spinner" class="show bg-white position-fixed translate-middle w-100 vh-100 top-50 start-50 d-flex align-items-center justify-content-center">
+        <div class="spinner"></div>
+    </div>
+    <!-- Spinner End -->
+
+
+   <!-- Topbar Start -->
+   <div class="container-fluid bg-dark px-5 d-none d-lg-block">
+        <div class="row gx-0">
+            <div class="col-lg-8 text-center text-lg-start mb-2 mb-lg-0">
+                <div class="d-inline-flex align-items-center" style="height: 45px;">
+                    <small class="me-3 text-light">test consultancy BV&nbsp;&nbsp;<i class="fa fa-map-marker-alt me-2"></i>Leuvensesteenweg 122 Zaventem 1932 Belgium.</small>
+                    <small class="me-3 text-light"><i class="fa fa-phone-alt me-2"></i>+32-472849033</small>
+                    <small class="text-light"><i class="fa fa-envelope-open me-2"></i><a href="mailto:admin@proconsultancy.be">admin@proconsultancy.be</a></small>
+                </div>
+            </div>
+            <div class="col-lg-4 text-center text-lg-end">
+                <div class="d-inline-flex align-items-center" style="height: 45px;">
+                    <a class="btn btn-sm btn-outline-light btn-sm-square rounded-circle me-2" href=""><i class="fab fa-twitter fw-normal"></i></a>
+                    <a class="btn btn-sm btn-outline-light btn-sm-square rounded-circle me-2" href=""><i class="fab fa-facebook-f fw-normal"></i></a>
+                    <a class="btn btn-sm btn-outline-light btn-sm-square rounded-circle me-2" href="https://www.linkedin.com/company/proconsultancypteltd/"><i class="fab fa-linkedin-in fw-normal"></i></a>
+                    <a class="btn btn-sm btn-outline-light btn-sm-square rounded-circle me-2" href=""><i class="fab fa-instagram fw-normal"></i></a>
+                    <a class="btn btn-sm btn-outline-light btn-sm-square rounded-circle" href=""><i class="fab fa-youtube fw-normal"></i></a>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Topbar End -->
+
+
+    <!-- Navbar Start -->
+    <div class="container-fluid position-relative p-0">
+        <nav class="navbar navbar-expand-lg navbar-dark px-5 py-3 py-lg-0">
+            <div class="d-flex">
+                <a href="index.html" class="navbar-brand p-0">
+                    <img src="img/pro-consultancy-logo.webp" alt="logo" style="width: 80%;">
+                </a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse">
+                    <span class="fa fa-bars"></span>
+                </button>
+            </div>
+            <div class="collapse navbar-collapse" id="navbarCollapse">
+                <div class="navbar-nav ms-auto py-0">
+                    <a href="index.html" class="nav-item nav-link">Home</a>
+                    <a href="about.html" class="nav-item nav-link">About</a>
+                    <a href="companies.html" class="nav-item nav-link">For Clients</a>
+                    <a href="candidates.html" class="nav-item nav-link">For Candidates</a>
+                    <a href="jobs.html" class="nav-item nav-link active">Jobs Openings</a>                    
+                    <a href="contact.html" class="nav-item nav-link">Contact</a>
+                </div>
+                <!-- Button to trigger the modal -->
+                <a href="#" class="btn btn-primary py-2 px-4 ms-3" data-bs-toggle="modal" data-bs-target="#cvModal">Submit your CV</a>
+
+                
+            </div>
+        </nav>
+
+        <div class="container-fluid bg-primary py-5 bg-header" style="background: linear-gradient(rgba(9, 30, 62, .7), rgba(9, 30, 62, .7)), url(img/jobpost.png) center center no-repeat; background-size: cover; margin-bottom: 90px;">
+            <div class="row py-5">
+                <div class="col-12 pt-lg-5 mt-lg-5 text-center">
+                    <h1 class="display-4 text-white animated zoomIn">&nbsp;</h1>
+                    <a  class="h5 text-white">&nbsp;</a>                    
+                    <a  class="h5 text-white">&nbsp;</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Navbar End -->
+
+    <!-- Modal -->
+    <div class="modal fade" id="cvModal" tabindex="-1" aria-labelledby="cvModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header"> 
+                    <h5 class="modal-title" id="cvModalLabel">Submit Your CV</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="cvForm">
+                        <div class="mb-3">
+                            <label for="cvName" class="form-label">Your Name</label>
+                            <input type="text" class="form-control" id="cvName" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="cvMobile" class="form-label">Your Mobile No</label>
+                            <input type="tel" class="form-control" id="cvMobile" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="cvEmail" class="form-label">Your Email</label>
+                            <input type="email" class="form-control" id="cvEmail" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="cvInterest" class="form-label">Your Interest in Job</label>
+                            <input type="text" class="form-control" id="cvInterest" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="cvFile" class="form-label">Upload Your CV (PDF or DOCX)</label>
+                            <input type="file" class="form-control" id="cvFile" accept=".pdf, .docx" required>
+                        </div>
+                        <div class="text-center">
+                            <button type="submit" class="btn btn-primary px-4">Submit</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<!-- Modal End-->
+
+
+
+
+
+
+
+
+    <!-- About Start -->
+    <div class="container-fluid wow fadeInUp" data-wow-delay="0.1s">
+        <div class="container">
+            <div class="row g-5">
+                <div class="col-lg-7">
+                    <div class="section-title position-relative pb-3 mb-5">
+                    <p class="me-3"><i class="far fa-user text-primary me-2"></i>Reference No : <?php echo $row["job_refno"];?></p>
+                        <div class="d-flex mb-3">
+                            <small class="me-3"><i class="far fa-user text-primary me-2"></i><?php echo $row["name"];?></small>
+                            <small><i class="far fa-calendar-alt text-primary me-2"></i><?php echo $row["posted_date"];?></small>
+                        </div>
+                        <h1 class="mb-0"><?php echo $row["heading"];?></h1>                                              
+                    </div>
+                    <p class="me-3"><i class="far fa-calendar-alt text-primary me-2"></i>Company Name : <?php echo $row["company_name"];?></p>                           
+                    <p class="me-3"><i class="far fa-calendar-alt text-primary me-2"></i>Experience : <?php echo $row["experience"];?></p>
+                    <p class="me-3"><i class="far fa-calendar-alt text-primary me-2"></i>Annual Package : <?php echo $row["annual_package"];?></p>
+                    <p class="me-3"><i class="far fa-calendar-alt text-primary me-2"></i>Job Location : <?php echo $row["job_location"];?></p>
+                    <p class="me-3"><i class="far fa-calendar-alt text-primary me-2"></i>Job Location : <?php echo $row["job_opening"];?></p>
+                    
+                    <div class="col-lg-12 py-3">
+                        <?php echo $row["details"];?>
+                    </div>                    
+                    
+                </div>
+                <div class="col-lg-5 wow slideInUp" data-wow-delay="0.3s">
+                    <form id="cv_ref_data">
+                        <div class="row g-3">
+                        <input type="hidden" id="job_refno" value="<?php echo $row["job_refno"];?>"/>
+                        <input type="hidden" id="created_by" value="<?php echo $row["created_by"];?>"/>
+                        <input type="hidden" id="created_email" value="<?php echo $row["email"];?>"/>
+                        <input type="hidden" id="created_name" value="<?php echo $row["name"];?>"/>
+                            <div class="col-md-6">                                
+                                <input type="text" id="emp_name" class="form-control border-1 bg-light px-4" placeholder="Your Name" style="height: 55px;">
+                            </div>
+                            <div class="col-md-6">
+                                <input type="email" id="emp_email" class="form-control border-1 bg-light px-4" placeholder="Your Email" style="height: 55px;">
+                            </div>
+                            <div class="col-12">
+                                <input type="text" id="emp_mob" class="form-control border-1 bg-light px-4" placeholder="Mobile No" style="height: 55px;">
+                            </div>
+                            <div class="col-12">
+                                <input type="text" id="emp_job" class="form-control border-1 bg-light px-4"  style="height: 55px;" value="<?php echo $row["heading"];?>" disabled/>
+                            </div>
+                            <div class="col-12">
+                                <input type="file" id="emp_file" class="form-control border-1 bg-light px-4" placeholder="Mobile No" style="height: 55px;">
+                                
+                            </div>
+                            <div class="col-12">
+                                <button class="btn btn-primary w-100 py-3" type="submit">Apply Now</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+
+                
+            </div>
+        </div>
+    </div>
+    <!-- About End -->
+
+
+   
+
+   
+    
+ <!-- Footer Start -->
+ <div class="container-fluid bg-dark text-light mt-5 wow fadeInUp" data-wow-delay="0.1s">
+        <div class="container">
+            <div class="row gx-5">
+                <div class="col-lg-4 col-md-6 footer-about">
+                    <div class="d-flex flex-column align-items-center justify-content-center text-center h-100 p-4" style="background-color: #66d7ff;">
+                        <a href="index.html" class="navbar-brand">
+                            <img src="img/pro-consultancy-logo.webp" alt="logo" style="width: 80%;">
+                        </a>
+                        <p class="mt-3 mb-4" style="color: #061429;">test consultancy is here to help you if you need support with IT consulting services provider specializing in talent acquisition, strategic projects, offshoring, nearshoring, and customized IT solutions for businesses worldwide. Propel your growth with our expertise . Our main goal is to equip businesses with the strategies and tools they require to succeed.</p>
+                        
+                    </div>
+                </div>
+                <div class="col-lg-8 col-md-6">
+                <div class="row gx-5">
+                    <div class="col-lg-6 col-md-12 pt-5 mb-5">
+                        <div class="section-title section-title-sm position-relative pb-3 mb-4">
+                            <h3 class="text-light mb-0">Europe Office</h3>
+                        </div>
+                        <div class="d-flex mb-2">
+                            <i class="bi bi-geo-alt text-primary me-2"></i>
+                            <p class="mb-0">test consultancy BV<br/> Leuvensesteenweg 122 <br/> Zaventem-1932 <br/>Belgium<br/>VAT: BE805377241</p>
+                        </div>
+                        <div class="d-flex mb-2">
+                            <i class="bi bi-envelope-open text-primary me-2"></i>
+                            <p class="mb-0">admin@proconsultancy.be</p>
+                        </div>
+                        <div class="d-flex mb-2">
+                            <i class="bi bi-telephone text-primary me-2"></i>
+                            <p class="mb-0">+32-472849033</p>
+                        </div>
+                        
+                    </div>
+                    
+                    
+                    <!--<div class="col-lg-4 col-md-12 pt-5 mb-5">-->
+                    <!--    <div class="section-title section-title-sm position-relative pb-3 mb-4">-->
+                    <!--        <h3 class="text-light mb-0">Asia Office</h3>-->
+                    <!--    </div>-->
+                    <!--    <div class="d-flex mb-2">-->
+                    <!--        <i class="bi bi-geo-alt text-primary me-2"></i>-->
+                    <!--        <p class="mb-0">test consultancy Pte. Ltd. <br/>68 Circular Road, #02-01, <br/>049422, Singapore <br/>REG: 201438333W</p>-->
+                    <!--    </div>-->
+                    <!--    <div class="d-flex mb-2">-->
+                    <!--        <i class="bi bi-envelope-open text-primary me-2"></i>-->
+                    <!--        <p class="mb-0">admin@proconsultancy.co.in</p>-->
+                    <!--    </div>-->
+                    <!--    <div class="d-flex mb-2">-->
+                    <!--        <i class="bi bi-telephone text-primary me-2"></i>-->
+                    <!--        <p class="mb-0">+32-472849033</p>-->
+                    <!--    </div>-->
+                        
+                    <!--</div>-->
+                    <div class="col-lg-6 col-md-12 pt-0 pt-lg-5 mb-5">
+                        <div class="section-title section-title-sm position-relative pb-3 mb-4">
+                            <h3 class="text-light mb-0">Quick Links</h3>
+                        </div>
+                        <div class="link-animated d-flex flex-column justify-content-start">
+                            <a class="text-light mb-2" href="index.html"><i class="bi bi-arrow-right text-primary me-2"></i>Home</a>
+                            <a class="text-light mb-2" href="about.html"><i class="bi bi-arrow-right text-primary me-2"></i>About Us</a>
+                            <a class="text-light mb-2" href="jobs.html"><i class="bi bi-arrow-right text-primary me-2"></i>Jobs Openings</a>
+                            <!--<a class="text-light mb-2" href="panel/consultancy/index.html"><i class="bi bi-arrow-right text-primary me-2"></i>Employee Login</a>-->
+                            <!--<a class="text-light" href="panel/user/index.html"><i class="bi bi-arrow-right text-primary me-2"></i>HR Login</a>-->
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+            </div>
+        </div>
+    </div>
+        <div class="container-fluid text-white" style="background: #061429;">
+            <div class="container text-center">
+                <div class="row justify-content-end">
+                    <div class="col-lg-8 col-md-6">
+                        <div class="d-flex align-items-center justify-content-center" style="height: 75px;">
+                            <p class="mb-0">&copy; <script>
+                                document.write(new Date().getFullYear());
+                            </script> test consultancy BV. All Rights Reserved.</p>
+                            
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    <!-- Footer End -->
+
+
+    <!-- Back to Top -->
+    <a href="#" class="btn btn-lg btn-primary btn-lg-square rounded back-to-top"><i class="bi bi-arrow-up"></i></a>
+
+
+    <!-- JavaScript Libraries -->
+    <script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/fetchdata.js"></script>
+    <script src="lib/wow/wow.min.js"></script>
+    <script src="lib/easing/easing.min.js"></script>
+    <script src="lib/waypoints/waypoints.min.js"></script>
+    <script src="lib/counterup/counterup.min.js"></script>
+    <script src="lib/owlcarousel/owl.carousel.min.js"></script>
+
+    <!-- Template Javascript -->
+    <script src="js/main.js"></script>
+</body>
+
+</html>
+
+<?php 
+ } else {
+    echo "No job found with the specified reference number.";
+}
+} else {
+    // Job ID is not set, display an alert and redirect to job.html
+    echo '<script>alert("Job ID Not Found");</script>';
+    echo '<script>window.location.href = "jobs.html";</script>';
+    // Optionally, you can also use header() to perform the redirect
+    // header("Location: job.html");
+    // exit; // Don't forget to exit to prevent further execution
+}
+
+?>

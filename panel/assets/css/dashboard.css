@@ -1,0 +1,205 @@
+/**
+ * Dashboard Styles
+ * Custom styles for dashboard page
+ * 
+ * @version 5.0
+ */
+
+/* ============================================================================
+   ACTIVITY TIMELINE
+   ============================================================================ */
+.activity-timeline {
+    position: relative;
+    padding-left: 0;
+}
+
+.activity-item {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 20px;
+    position: relative;
+}
+
+.activity-item:last-child {
+    margin-bottom: 0;
+}
+
+.activity-item:not(:last-child)::before {
+    content: '';
+    position: absolute;
+    left: 19px;
+    top: 40px;
+    bottom: -20px;
+    width: 2px;
+    background-color: #e7e7e7;
+}
+
+.activity-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 18px;
+    box-shadow: 0 2px 6px rgba(102, 126, 234, 0.3);
+    z-index: 1;
+    position: relative;
+}
+
+.activity-content {
+    flex: 1;
+    padding-top: 8px;
+}
+
+.activity-text {
+    margin-bottom: 4px;
+    color: #4a5568;
+    line-height: 1.5;
+}
+
+.activity-text strong {
+    color: #2d3748;
+    font-weight: 600;
+}
+
+.activity-time {
+    font-size: 12px;
+    color: #718096;
+}
+
+/* ============================================================================
+   STAT CARDS
+   ============================================================================ */
+.card .content-left {
+    flex: 1;
+}
+
+.card .avatar {
+    flex-shrink: 0;
+}
+
+.card .avatar-initial {
+    width: 42px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+}
+
+.card h3 {
+    font-weight: 600;
+    color: #2d3748;
+}
+
+.card small {
+    font-size: 0.875rem;
+}
+
+/* ============================================================================
+   QUICK ACTIONS
+   ============================================================================ */
+.btn-outline-primary:hover,
+.btn-outline-success:hover,
+.btn-outline-warning:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    transition: all 0.2s ease;
+}
+
+.btn .badge {
+    position: relative;
+    top: -1px;
+}
+
+/* ============================================================================
+   RESPONSIVE ADJUSTMENTS
+   ============================================================================ */
+@media (max-width: 768px) {
+    .activity-item {
+        gap: 10px;
+    }
+    
+    .activity-icon {
+        width: 32px;
+        height: 32px;
+        font-size: 16px;
+    }
+    
+    .activity-item:not(:last-child)::before {
+        left: 15px;
+    }
+}
+
+/* ============================================================================
+   EMPTY STATE
+   ============================================================================ */
+.text-center .bx-lg {
+    font-size: 48px;
+}
+
+.text-center .text-muted {
+    color: #a0aec0 !important;
+}
+
+/* ============================================================================
+   CARD HOVER EFFECTS
+   ============================================================================ */
+.card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* ============================================================================
+   AVATAR COLORS
+   ============================================================================ */
+.bg-label-primary {
+    background-color: rgba(105, 108, 255, 0.16) !important;
+    color: #696cff !important;
+}
+
+.bg-label-success {
+    background-color: rgba(113, 221, 55, 0.16) !important;
+    color: #71dd37 !important;
+}
+
+.bg-label-danger {
+    background-color: rgba(255, 62, 29, 0.16) !important;
+    color: #ff3e1d !important;
+}
+
+.bg-label-warning {
+    background-color: rgba(255, 171, 0, 0.16) !important;
+    color: #ffab00 !important;
+}
+
+.bg-label-info {
+    background-color: rgba(3, 195, 236, 0.16) !important;
+    color: #03c3ec !important;
+}
+
+/* ============================================================================
+   LOADING STATE
+   ============================================================================ */
+.skeleton-loader {
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: loading 1.5s infinite;
+}
+
+@keyframes loading {
+    0% {
+        background-position: 200% 0;
+    }
+    100% {
+        background-position: -200% 0;
+    }
+}
