@@ -16,15 +16,10 @@ class Session {
         self::$started = true;
     }
 
-    // --- ADD THIS METHOD ---
-    /**
-     * Check if a key exists in the session
-     */
     public static function has(string $key): bool {
         self::start();
         return isset($_SESSION[$key]);
     }
-    // -----------------------
 
     public static function set(string $key, $value): void {
         self::start();
@@ -41,5 +36,27 @@ class Session {
         if (isset($_SESSION[$key])) {
             unset($_SESSION[$key]);
         }
+    }
+    
+    // for logou
+    public static function destroy(): void {
+        self::start();
+        $_SESSION = [];
+        
+        if (ini_get("session.use_cookies")) {
+            $params = session_get_cookie_params();
+            setcookie(session_name(), '', time() - 42000,
+                $params["path"], $params["domain"],
+                $params["secure"], $params["httponly"]
+            );
+        }
+        
+        session_destroy();
+        self::$started = false;
+    }
+    
+    public static function regenerate(): void {
+        self::start();
+        session_regenerate_id(true);
     }
 }

@@ -1,12 +1,9 @@
 <?php
 /**
  * Logout Handler
- * End user session
- * 
- * @version 5.0
  */
 
-require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/../includes/config/app.php';
 require_once __DIR__ . '/../includes/Core/Logger.php';
 require_once __DIR__ . '/../includes/Core/Session.php';
 require_once __DIR__ . '/../includes/Core/Auth.php';
@@ -18,10 +15,14 @@ use ProConsultancy\Core\Logger;
 Session::start();
 
 // Log logout
-Logger::getInstance()->info('User logged out', [
-    'user_code' => Auth::userCode(),
-    'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
-]);
+try {
+    Logger::getInstance()->info('User logged out', [
+        'user_code' => Auth::userCode(),
+        'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
+    ]);
+} catch (Exception $e) {
+    // Ignore logging errors
+}
 
 // Logout
 Auth::logout();

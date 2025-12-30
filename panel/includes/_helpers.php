@@ -56,7 +56,6 @@ if (!function_exists('redirectWithMessage')) {
      * @param string $type
      */
     function redirectWithMessage($url, $message, $type = 'info') {
-        if (!isset($_SESSION)) session_start();
         setFlashMessage($message, $type);
         header("Location: {$url}");
         exit;

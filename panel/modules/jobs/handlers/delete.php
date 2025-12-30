@@ -3,7 +3,7 @@
  * Delete Job Handler
  * Deletes job and related data
  * 
- * @version 5.0
+ * @version 2.0
  */
 
 require_once __DIR__ . '/../../_common.php';

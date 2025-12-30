@@ -1,6 +1,6 @@
 <?php
 /**
- * Main Sidebar Navigation - UPDATED VERSION 5.0
+ * Main Sidebar Navigation 
  * File: panel/includes/sidebar.php
  * 
  * Permissions-aware navigation with all latest modules:

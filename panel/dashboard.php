@@ -1,24 +1,43 @@
 <?php
 /**
  * Dashboard - Main Landing Page
- * Simplified for current schema (clients, jobs, candidates, submissions only)
  * 
- * @version 3.0 - Working Version
+ * @version 2.0
  */
-echo "<h3>Auth Debugger</h3>";
-console_log("Checking Auth dashbord: " . $error);
-// require_once __DIR__ . '/modules/_common.php';
+// Add at top of dashboard.php temporarily:
+var_dump(Auth::check());
+var_dump(Auth::user());
+var_dump($_SESSION);
+die();
 
-// use ProConsultancy\Core\Logger;
-// use ProConsultancy\Core\Auth;
-// use ProConsultancy\Core\Database;
-// use ProConsultancy\Core\Permission;
+require_once __DIR__ . '/modules/_common.php';
+
+
+use ProConsultancy\Core\Logger;
+use ProConsultancy\Core\Auth;
+use ProConsultancy\Core\Database;
+use ProConsultancy\Core\Permission;
+
+/**
+ * HARD LOOP BREAKER
+ */
+if (Session::get('_login_fresh') === true) {
+    Session::remove('_login_fresh');
+    // Allow dashboard to load ONCE without auth redirect
+} else {
+    if (!Auth::check()) {
+        header('Location: /panel/login.php');
+        exit;
+    }
+}
+
+
 
 // Check permission
-// if (!Permission::can('reports', 'view_dashboard')) {
-//     header('Location: /panel/errors/403.php');
-//     exit;
-// }
+if (!Permission::can('reports', 'view_dashboard')) {
+    header('Location: /panel/errors/403.php');
+    exit;
+}
 
 $user = Auth::user();
 $userCode = $user['user_code'];

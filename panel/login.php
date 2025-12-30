@@ -1,9 +1,6 @@
 <?php
 /**
- * Login Page
- * User authentication interface
- * 
- * @version 5.0
+ * Login Page - FINAL FIXED VERSION
  */
 
 require_once __DIR__ . '/../includes/config/app.php';
@@ -24,16 +21,18 @@ Session::start();
 
 // Redirect if already logged in
 if (Auth::check()) {
-    header('Location: /panel/dashboard.php');
+    $redirect = $_SESSION['intended_url'] ?? '/panel/dashboard.php';
+    unset($_SESSION['intended_url']);
+    header('Location: ' . $redirect);
     exit;
 }
 
-// Handle login form submission
 $error = null;
 
+// Handle login form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
-        // 1. Verify CSRF
+        // Verify CSRF
         if (!CSRFToken::verifyRequest()) {
             throw new Exception('Invalid session. Please refresh and try again.');
         }
@@ -42,30 +41,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $password = $_POST['password'] ?? '';
         $remember = isset($_POST['remember']);
         
-        // 2. Attempt Login
+        // Validate input
+        if (empty($identifier) || empty($password)) {
+            throw new Exception('Email/user code and password are required');
+        }
+        
+        // Attempt Login
         if (Auth::attempt($identifier, $password, $remember)) {
-            echo "<h3>Auth logging</h3>";
+            // SUCCESS - Get redirect URL
+            $redirect = $_SESSION['intended_url'] ?? '/panel/dashboard.php';
+            unset($_SESSION['intended_url']);
             
-            // SUCCESS: Redirect to dashboard
-            header('Location: /panel/dashboard.php');
-            console_log("Checking Auth loggin: " . $error);
+            // Redirect to dashboard
+            header('Location: ' . $redirect);
             exit;
         } else {
-            // FAILURE: Set error and REDIRECT back to login
-            Session::set('login_error', 'Invalid email/user code or password');
-            header('Location: login.php'); // This clears the POST data!
-            exit;
+            // FAILURE
+            $error = 'Invalid email/user code or password';
         }
+        
     } catch (Exception $e) {
-        Session::set('login_error', $e->getMessage());
-        header('Location: login.php');
-        exit;
+        $error = $e->getMessage();
     }
 }
-
-// 3. Get and immediately CLEAR the error (so it won't show on refresh)
-$error = Session::get('login_error');
-Session::remove('login_error');
 
 ?>
 <!DOCTYPE html>
