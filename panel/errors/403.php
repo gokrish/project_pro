@@ -5,7 +5,10 @@
  * 
  * @version 5.0
  */
-
+ // Try to load core classes
+    use ProConsultancy\Core\Auth;
+    use ProConsultancy\Core\Logger;
+    use ProConsultancy\Core\Branding;
 // Set HTTP status code
 http_response_code(403);
 
@@ -15,10 +18,7 @@ try {
     define('PANEL_ACCESS', true);
     require_once __DIR__ . '/../includes/config/config.php';
     
-    // Try to load core classes
-    use ProConsultancy\Core\Auth;
-    use ProConsultancy\Core\Logger;
-    use ProConsultancy\Core\Branding;
+   
     
     // Check if user is authenticated
     $isAuthenticated = false;

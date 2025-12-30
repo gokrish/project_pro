@@ -6,7 +6,9 @@
  * @version 5.0
  * 
  */
-
+    // Try to load core classes
+    use ProConsultancy\Core\Logger;
+    use ProConsultancy\Core\Branding;
 // Set HTTP status code
 http_response_code(500);
 
@@ -20,9 +22,7 @@ try {
     define('PANEL_ACCESS', true);
     require_once __DIR__ . '/../includes/config/config.php';
     
-    // Try to load core classes
-    use ProConsultancy\Core\Logger;
-    use ProConsultancy\Core\Branding;
+
     
     // Check if we should show error details
     $showDetails = defined('APP_DEBUG') && APP_DEBUG;

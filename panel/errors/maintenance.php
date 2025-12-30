@@ -13,7 +13,8 @@
  *        exit;
  *    }
  */
-
+    
+use ProConsultancy\Core\Branding;
 http_response_code(503);
 
 // Prevent errors from breaking the maintenance page
@@ -21,8 +22,7 @@ try {
     // Load configuration
     define('PANEL_ACCESS', true);
     require_once __DIR__ . '/../includes/config/config.php';
-    
-    use ProConsultancy\Core\Branding;
+
     
     // Get maintenance settings
     $maintenanceMessage = defined('MAINTENANCE_MESSAGE') 
