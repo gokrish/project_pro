@@ -315,66 +315,112 @@ CREATE TABLE `password_resets` (
 -- SECTION 2: CORE ENTITIES 
 -- ============================================================================
 
--- Candidates 
-CREATE TABLE `candidates` (
-    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    `candidate_code` VARCHAR(50) UNIQUE NOT NULL,
-    `candidate_name` VARCHAR(255) NOT NULL,
-    `email` VARCHAR(255) UNIQUE NOT NULL,
-    `phone` VARCHAR(20) NOT NULL,
-    `phone_alternate` VARCHAR(20),
+-- -- Candidates 
+-- CREATE TABLE `candidates` (
+--     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+--     `candidate_code` VARCHAR(50) UNIQUE NOT NULL,
+--     `candidate_name` VARCHAR(255) NOT NULL,
+--     `email_id` VARCHAR(255) NOT NULL,
+--     `alternate_email_id` VARCHAR(255),
+--     `phone` VARCHAR(20) NOT NULL,
+--     `phone_alternate` VARCHAR(20),
+--     `linkedin` VARCHAR(255),
+
+--     -- Basic information only
+--   `current_location` VARCHAR(100), (dropdown list .. belgiunm, nedherlands, luxmberg, germany ,france , india default belgium)
+--   `current_employer` VARCHAR(100),
+--   `current_agency` VARCHAR(100),
+--   `current_salary` DECIMAL(10,2),
+--   `expected_salary` DECIMAL(10,2),
+--   `notice_period` INT,
+--   `can_join` DATE,
+--   `current_daily_rate` DECIMAL(10,2),
+--   `expected_daily_rate` DECIMAL(10,2),
+--   `current_working_status` ENUM('Freelance(Self)', 'Freelance(Company)', 'Employee'),
+--   'prof_summary' TEXT,
+--     `skills` Json,
+
+--   `languages` VARCHAR(255), (dropdown list .. france, dutch, germany, english default englisg)
+--   `lead_type` ENUM('Cold', 'Warm', 'Hot', 'Blacklist'),
+--   `lead_type_role` ENUM('payroll', 'recruitment', 'both','invoice'),
+--   `work_authorization_status` INT,
+--   `follow_up` ENUM('Done', 'Not Done'),
+--   `follow_up_date` DATE,
+--   `face_to_face` DATE,
+--   `extra_details` TEXT,
+--   `consent` VARCHAR(255),
+--     -- Status workflow
+--     `status` ENUM(
+--         'new',          -- Just added
+--         'screening',    -- Being reviewed
+--         'qualified',    -- Ready for jobs
+--         'active',       -- Has active submissions
+--         'placed',       -- Successfully placed
+--         'rejected',     -- Failed screening
+--         'archived'      -- Inactive
+--     ) DEFAULT 'new',
     
-    -- Basic information only
-    `current_location` VARCHAR(255),
-    `current_position` VARCHAR(255),
-    `current_company` VARCHAR(255),
-    `work_authorization_status` VARCHAR(100),
-    `linkedin_url` VARCHAR(255),
-    `skills` TEXT,
-    `total_experience` DECIMAL(4,1),
+--     -- Screening tracking
+--     `screening_completed_at` TIMESTAMP NULL,
+--     `screening_notes` TEXT,
     
-    -- Status workflow
-    `status` ENUM(
-        'new',          -- Just added
-        'screening',    -- Being reviewed
-        'qualified',    -- Ready for jobs
-        'active',       -- Has active submissions
-        'placed',       -- Successfully placed
-        'rejected',     -- Failed screening
-        'archived'      -- Inactive
-    ) DEFAULT 'new',
+--     -- Assignment
+--     `assigned_to` VARCHAR(50) COMMENT 'user_code',
     
-    -- Screening tracking
-    `screening_completed_at` TIMESTAMP NULL,
-    `screening_notes` TEXT,
+--     -- Resume
+--   `candidate_cv` VARCHAR(255),
+--   `consultancy_cv` VARCHAR(255),
     
-    -- Assignment
-    `assigned_to` VARCHAR(50) COMMENT 'user_code',
+--     -- Activity counters (auto-updated)
+--     `total_submissions` INT DEFAULT 0,
+--     `total_interviews` INT DEFAULT 0,
+--     `total_placements` INT DEFAULT 0,
     
-    -- Resume
-    `resume_path` VARCHAR(500),
+--     -- Notes
+--     `notes` TEXT,
     
-    -- Activity counters (auto-updated)
-    `total_submissions` INT DEFAULT 0,
-    `total_interviews` INT DEFAULT 0,
-    `total_placements` INT DEFAULT 0,
+--     -- Timestamps
+--     `created_by` VARCHAR(50),
+--     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+--     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+--     `deleted_at` TIMESTAMP NULL,
     
-    -- Notes
-    `notes` TEXT,
-    
-    -- Timestamps
-    `created_by` VARCHAR(50),
-    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    `deleted_at` TIMESTAMP NULL,
-    
-    INDEX `idx_code` (`candidate_code`),
-    INDEX `idx_email` (`email`),
-    INDEX `idx_status` (`status`),
-    INDEX `idx_assigned` (`assigned_to`),
-    INDEX `idx_status_screening` (`status`, `screening_completed_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='Candidate profiles - simplified structure';
+--     INDEX `idx_code` (`candidate_code`),
+--     INDEX `idx_email` (`email`),
+--     INDEX `idx_status` (`status`),
+--     INDEX `idx_assigned` (`assigned_to`),
+--     INDEX `idx_status_screening` (`status`, `screening_completed_at`)
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+-- COMMENT='Candidate profiles storing';
+
+-- -- Candidates Edit Info (existing)
+-- CREATE TABLE IF NOT EXISTS `candidates_edit_info` (
+--   `id` INT AUTO_INCREMENT PRIMARY KEY,
+--   `candidate_code` VARCHAR(50) NOT NULL,
+--   `column_id` INT,
+--   `data` TEXT,
+--   `edited_field` VARCHAR(100),
+--   `old_value` TEXT,
+--   `new_value` TEXT,
+--   `edited_by` VARCHAR(50),
+--   `edited_name` VARCHAR(100),
+--   `edited_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+--   FOREIGN KEY (`candidate_code`) REFERENCES `candidates`(`candidate_code`) ON DELETE CASCADE
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- -- Work Authorization (existing) but table name is differnt work_auth)
+-- CREATE TABLE IF NOT EXISTS `work_authorization` ( 
+--   `id` INT AUTO_INCREMENT PRIMARY KEY,
+--   `status` VARCHAR(100) NOT NULL
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- -- Technical Skills 
+-- CREATE TABLE IF NOT EXISTS `technical_skills` (
+--   `id` INT AUTO_INCREMENT PRIMARY KEY,
+--   `skill` VARCHAR(100) NOT NULL
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
 
 -- Clients 
 CREATE TABLE `clients` (
@@ -599,26 +645,24 @@ CREATE TABLE IF NOT EXISTS `contacts` (
     INDEX `idx_assigned` (`assigned_to`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- CV Inbox
-CREATE TABLE IF NOT EXISTS `cv_inbox` (
-    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    `cv_code` VARCHAR(50) UNIQUE NOT NULL,
-    `name` VARCHAR(255) NOT NULL,
-    `email` VARCHAR(255) NOT NULL,
-    `phone` VARCHAR(50) NULL,
-    `cv_path` VARCHAR(500) NULL,
-    `source` VARCHAR(100) NULL,
-    `status` ENUM('new', 'reviewed', 'shortlisted', 'converted', 'rejected') DEFAULT 'new',
-    `notes` TEXT NULL,
-    `reviewed_by` VARCHAR(50) NULL,
-    `reviewed_at` TIMESTAMP NULL,
-    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `deleted_at` TIMESTAMP NULL,
-    INDEX `idx_code` (`cv_code`),
-    INDEX `idx_status` (`status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- -- CV Inbox (Submitted CV should link to jobid and jobref id job_refno)
+-- CREATE TABLE IF NOT EXISTS `cv_inbox` (
+--     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+--     `job_id` INT,
+--     `cv_path` VARCHAR(500) NULL,
+--     `source` VARCHAR(100), (website)
+--     `status` ENUM('new', 'reviewed', 'shortlisted', 'converted', 'rejected') DEFAULT 'new',
+--     `notes` TEXT NULL,
+--     `reviewed_by` VARCHAR(50) NULL,
+--     `reviewed_at` TIMESTAMP NULL,
+--     `submitted_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+--     `deleted_at` TIMESTAMP NULL,
+--     INDEX `idx_code` (`cv_code`),
+--     INDEX `idx_status` (`status`)
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Website Queries (for future implementation)
+
+-- Website Queries
 
 CREATE TABLE IF NOT EXISTS `queries` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -659,7 +703,7 @@ CREATE TABLE `activity_log` (
 -- Notes (Universal)
 CREATE TABLE `notes` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    `entity_type` ENUM('candidate', 'client', 'job', 'submission', 'contact') NOT NULL,
+    `entity_type` ENUM('candidate', 'client', 'job', 'submission', 'contact','cv_inbox') NOT NULL,
     `entity_code` VARCHAR(50) NOT NULL,
     `note_type` ENUM('general', 'call', 'meeting', 'email', 'followup') DEFAULT 'general',
     `content` TEXT NOT NULL,
