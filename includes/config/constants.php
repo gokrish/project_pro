@@ -21,7 +21,7 @@ define('ROLE_MANAGER', 'manager');
 define('ROLE_SENIOR_RECRUITER', 'senior_recruiter');
 define('ROLE_RECRUITER', 'recruiter');
 define('ROLE_COORDINATOR', 'coordinator');
-
+define('ROLE_USER', 'user');
 // All available roles
 define('ALL_ROLES', [
     ROLE_SUPER_ADMIN,
@@ -29,7 +29,8 @@ define('ALL_ROLES', [
     ROLE_MANAGER,
     ROLE_SENIOR_RECRUITER,
     ROLE_RECRUITER,
-    ROLE_COORDINATOR
+    ROLE_COORDINATOR,
+    ROLE_USER
 ]);
 
 // Role display names
@@ -132,21 +133,6 @@ define('MODULE_PERMISSIONS', [
         'convert_to_application'
     ],
     
-    // Applications Module
-    'applications' => [
-        'view_all',
-        'view_own',
-        'create',
-        'edit',
-        'edit_own',
-        'delete',
-        'delete_own',
-        'schedule_interview',
-        'make_offer',
-        'update_status',
-        'view_pipeline',
-        'place_candidate'
-    ],
     
     // CV Inbox Module
     'cv_inbox' => [

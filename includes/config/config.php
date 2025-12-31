@@ -4,7 +4,7 @@
  * Loads and consolidates all configuration settings
  * 
  * @package ProConsultancy
- * @version 5.0
+ * @version 2.0
  */
 
 // Prevent direct access
@@ -15,6 +15,15 @@ if (!defined('PANEL_ACCESS')) {
 // Load sub-configuration files
 $appConfig = require __DIR__ . '/app.php';
 $dbConfig = require __DIR__ . '/database.php';
+
+// ============================================================================
+// 🔧 DEVELOPMENT MODE (Define FIRST - before anything else)
+// ============================================================================
+define('DEV_MODE', $appConfig['dev_mode']);
+define('DEV_USER_CODE', $appConfig['dev_user_code']);
+define('DEV_AUTO_LOGIN', $appConfig['dev_auto_login']);
+define('DEV_SHOW_BANNER', $appConfig['dev_show_banner']);
+define('DEV_TOKEN_EXPIRY_DAYS', $appConfig['dev_token_expiry_days']);
 
 // ============================================================================
 // BASE URL CONFIGURATION
@@ -63,6 +72,13 @@ define('SESSION_HTTPONLY', true);
 define('SESSION_SAMESITE', 'Lax');
 
 // ============================================================================
+// TOKEN CONFIGURATION (for authentication)
+// ============================================================================
+define('TOKEN_EXPIRY_HOURS', $appConfig['token_expiry_hours']);
+define('TOKEN_REMEMBER_DAYS', $appConfig['token_remember_days']);
+define('TOKEN_CLEANUP_ENABLED', $appConfig['token_cleanup_enabled']);
+
+// ============================================================================
 // SECURITY CONFIGURATION
 // ============================================================================
 define('CSRF_TOKEN_NAME', $appConfig['csrf_token_name']);
@@ -70,8 +86,8 @@ define('PASSWORD_MIN_LENGTH', $appConfig['password_min_length']);
 define('PASSWORD_REQUIRE_SPECIAL', $appConfig['password_require_special']);
 define('PASSWORD_REQUIRE_NUMBER', $appConfig['password_require_number']);
 define('PASSWORD_REQUIRE_UPPERCASE', $appConfig['password_require_uppercase']);
-define('MAX_LOGIN_ATTEMPTS', 5);
-define('ACCOUNT_LOCK_DURATION', 30); // minutes
+define('MAX_LOGIN_ATTEMPTS', $appConfig['max_login_attempts']);
+define('ACCOUNT_LOCK_DURATION', $appConfig['account_lock_duration']); // minutes
 
 // ============================================================================
 // FILE UPLOAD CONFIGURATION
@@ -194,4 +210,7 @@ if (file_exists(ROOT_PATH . '/vendor/autoload.php')) {
     require ROOT_PATH . '/vendor/autoload.php';
 }
 
-require_once __DIR__ . '/constants.php';
+// Load constants file if exists
+if (file_exists(__DIR__ . '/constants.php')) {
+    require_once __DIR__ . '/constants.php';
+}

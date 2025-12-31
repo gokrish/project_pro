@@ -46,6 +46,9 @@ DROP TABLE IF EXISTS `user_permissions`;
 DROP TABLE IF EXISTS `role_permissions`;
 DROP TABLE IF EXISTS `permissions`;
 DROP TABLE IF EXISTS `users`;
+DROP TABLE IF EXISTS `user_sessions`;
+DROP TABLE IF EXISTS `password_resets`;
+DROP TABLE IF EXISTS `tokens`;
 DROP TABLE IF EXISTS `roles`;
 DROP TABLE IF EXISTS `settings`;
 DROP TABLE IF EXISTS `email_templates`;
@@ -270,6 +273,42 @@ CREATE TABLE `user_sessions` (
     INDEX `idx_user_code` (`user_code`),
     INDEX `idx_session_token` (`session_token`),
     INDEX `idx_expires_at` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
+-- TOKENS TABLE (for authentication)
+-- ============================================================================
+CREATE TABLE `tokens` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `user_code` VARCHAR(50) NOT NULL,
+    `token` VARCHAR(255) NOT NULL UNIQUE,
+    `expires_at` DATETIME NOT NULL,
+    `ip_address` VARCHAR(45) NULL,
+    `user_agent` VARCHAR(500) NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    INDEX `idx_token` (`token`),
+    INDEX `idx_user_code` (`user_code`),
+    INDEX `idx_expires_at` (`expires_at`)
+    
+    
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
+-- PASSWORD RESETS TABLE (for forgot password)
+-- ============================================================================
+CREATE TABLE `password_resets` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `user_code` VARCHAR(50) NOT NULL,
+    `token` VARCHAR(255) NOT NULL UNIQUE,
+    `expires_at` DATETIME NOT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    INDEX `idx_token` (`token`),
+    INDEX `idx_user_code` (`user_code`),
+    INDEX `idx_expires_at` (`expires_at`)
+    
+    
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================

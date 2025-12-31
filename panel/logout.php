@@ -1,30 +1,17 @@
 <?php
 /**
- * Logout Handler
+ * Logout - Token-based
  */
-
-require_once __DIR__ . '/../includes/config/app.php';
-require_once __DIR__ . '/../includes/Core/Logger.php';
+require_once __DIR__ . '/../includes/config/config.php';
 require_once __DIR__ . '/../includes/Core/Session.php';
 require_once __DIR__ . '/../includes/Core/Auth.php';
 
 use ProConsultancy\Core\Session;
 use ProConsultancy\Core\Auth;
-use ProConsultancy\Core\Logger;
 
 Session::start();
 
-// Log logout
-try {
-    Logger::getInstance()->info('User logged out', [
-        'user_code' => Auth::userCode(),
-        'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
-    ]);
-} catch (Exception $e) {
-    // Ignore logging errors
-}
-
-// Logout
+// Logout (deletes token from database)
 Auth::logout();
 
 // Redirect to login

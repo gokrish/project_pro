@@ -1,60 +1,81 @@
 <?php
 /**
  * Application Configuration
- * @version 5.0
+ * 
+ * @package ProConsultancy
+ * @version 2.0
  */
 
 return [
-    // Application
+    // ============================================================================
+    // APPLICATION SETTINGS
+    // ============================================================================
     'app_name' => 'ProConsultancy',
     'app_version' => '5.0.0',
-    'app_env' => 'development', // production, staging, development
-    'app_debug' => true, // Set to false in production
-    'app_url' => 'http://localhost/proconsultancy',
+    'app_env' => 'development', 
+    'app_debug' => true,
+    'app_url' => 'http://proconsultancy.test',
     'app_timezone' => 'Europe/Brussels',
     
-    // Security
-    'session_lifetime' => 1800, // 30 minutes
-    'session_name' => 'PROCONSULTANCY_SESSION',
+    // ============================================================================
+    // DEVELOPMENT MODE (for testing without login)
+    // ============================================================================
+    'dev_mode' => true,                    // Set to FALSE in production!
+    'dev_user_code' => 'ADMIN',           // User code to auto-login as
+    'dev_auto_login' => true,             // Automatically create token & login
+    'dev_show_banner' => true,            // Show dev mode banner
+    'dev_token_expiry_days' => 365,       // Dev token valid for 1 year
+    
+    // ============================================================================
+    // SESSION SETTINGS
+    // ============================================================================
+    'session_lifetime' => 1800, // 30 minutes (in seconds)
+    'session_name' => 'proconsultancy_session',
+    
+    // ============================================================================
+    // SECURITY SETTINGS
+    // ============================================================================
     'csrf_token_name' => 'csrf_token',
-    
-    // Uploads
-    'upload_max_size' => 5242880, // 5MB in bytes
-    'upload_allowed_types' => ['pdf', 'doc', 'docx', 'txt', 'jpg', 'jpeg', 'png'],
-    'upload_path' => __DIR__ . '/../uploads/',
-    
-    // Pagination
-    'items_per_page' => 25,
-    
-    // Password
-    'password_min_length' => 8,
-    'password_require_special' => true,
+    'password_min_length' => 6,
+    'password_require_special' => false,
     'password_require_number' => true,
     'password_require_uppercase' => true,
+    'max_login_attempts' => 5,
+    'account_lock_duration' => 30, // minutes
     
-    // Email
-    'from_email' => 'noreply@proconsultancy.be',
+    // ============================================================================
+    // TOKEN SETTINGS (for authentication)
+    // ============================================================================
+    'token_expiry_hours' => 24,           // Normal token expires in 24 hours
+    'token_remember_days' => 30,          // Remember me token expires in 30 days
+    'token_cleanup_enabled' => true,      // Auto-cleanup expired tokens
+    
+    // ============================================================================
+    // FILE UPLOAD SETTINGS
+    // ============================================================================
+    'upload_max_size' => 5242880, // 5MB in bytes
+    'upload_allowed_types' => ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'],
+    
+    // ============================================================================
+    // PAGINATION SETTINGS
+    // ============================================================================
+    'items_per_page' => 25,
+    
+    // ============================================================================
+    // EMAIL SETTINGS
+    // ============================================================================
+    'from_email' => 'noreply@proconsultancy.com',
     'from_name' => 'ProConsultancy',
-
-    // SMTP Configuration
-    'smtp_host' => 'smtp.gmail.com',
-    'smtp_port' => 587,
-    'smtp_username' => '',
-    'smtp_password' => '',
-    'smtp_encryption' => 'tls',
-
-    // Email Queue
-    'mail_use_queue' => false,
-
-    // API Configuration
-    'api_cors_enabled' => false,
-    'api_cors_origin' => '*',
-    // Logging
-    'log_level' => 'debug', // debug, info, warning, error
-    'log_path' => __DIR__ . '/../storage/logs/',
     
-    // Features
-    'enable_resume_parsing' => true,
-    'enable_email_notifications' => true,
+    // ============================================================================
+    // LOGGING SETTINGS
+    // ============================================================================
+    'log_level' => 'info', // debug, info, warning, error
+    
+    // ============================================================================
+    // FEATURE FLAGS
+    // ============================================================================
+    'enable_resume_parsing' => false,
+    'enable_email_notifications' => false,
     'enable_activity_log' => true,
 ];

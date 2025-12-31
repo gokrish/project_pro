@@ -1,62 +1,141 @@
 <?php
 /**
- * Login Page - FINAL FIXED VERSION
+ * Login Page - TOKEN BASED with DEV MODE
  */
 
+// Define PANEL_ACCESS before loading config
+if (!defined('PANEL_ACCESS')) {
+    define('PANEL_ACCESS', true);
+}
+
+if (!defined('ROOT_PATH')) {
+    define('ROOT_PATH', dirname(dirname(__DIR__)));
+}
+
+if (!defined('INCLUDES_PATH')) {
+    define('INCLUDES_PATH', ROOT_PATH . '/includes');
+}
+
+// Load configuration
 require_once __DIR__ . '/../includes/config/app.php';
-require_once __DIR__ . '/../includes/Core/Logger.php';
 require_once __DIR__ . '/../includes/Core/Database.php';
-require_once __DIR__ . '/../includes/Core/ErrorHandler.php';
 require_once __DIR__ . '/../includes/Core/Session.php';
 require_once __DIR__ . '/../includes/Core/Auth.php';
 require_once __DIR__ . '/../includes/Core/CSRFToken.php';
-require_once __DIR__ . '/../includes/Core/Validator.php';
-require_once __DIR__ . '/../includes/Core/FlashMessage.php';
 
-use ProConsultancy\Core\Session;
 use ProConsultancy\Core\Auth;
+use ProConsultancy\Core\Session;
 use ProConsultancy\Core\CSRFToken;
 
+// ============================================================================
+// DEV MODE: Auto-login and redirect
+// ============================================================================
+if (defined('DEV_MODE') && DEV_MODE && defined('DEV_AUTO_LOGIN') && DEV_AUTO_LOGIN) {
+    Session::start();
+    
+    // If not authenticated, setup dev login
+    if (!isset($_SESSION['authenticated']) || $_SESSION['authenticated'] !== true) {
+        try {
+            $devConn = mysqli_connect(DB_HOST, DB_USER, DB_PASS, DB_NAME);
+            
+            if ($devConn) {
+                mysqli_set_charset($devConn, 'utf8mb4');
+                
+                $stmt = $devConn->prepare("SELECT * FROM users WHERE user_code = ? AND is_active = 1 LIMIT 1");
+                $stmt->bind_param("s", DEV_USER_CODE);
+                $stmt->execute();
+                $result = $stmt->get_result();
+                
+                if ($user = $result->fetch_assoc()) {
+                    // Create dev token
+                    $devToken = 'DEV_TOKEN_' . md5(DEV_USER_CODE . 'proconsultancy');
+                    
+                    // Check if dev token exists
+                    $checkStmt = $devConn->prepare("SELECT id FROM tokens WHERE token = ?");
+                    $checkStmt->bind_param("s", $devToken);
+                    $checkStmt->execute();
+                    $tokenExists = $checkStmt->get_result()->num_rows > 0;
+                    
+                    // Create token if doesn't exist
+                    if (!$tokenExists) {
+                        $expiryDays = defined('DEV_TOKEN_EXPIRY_DAYS') ? DEV_TOKEN_EXPIRY_DAYS : 365;
+                        $insertStmt = $devConn->prepare(
+                            "INSERT INTO tokens (user_code, token, expires_at, ip_address, user_agent, created_at) 
+                             VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? DAY), '127.0.0.1', 'DEV_MODE', NOW())"
+                        );
+                        $insertStmt->bind_param("ssi", DEV_USER_CODE, $devToken, $expiryDays);
+                        $insertStmt->execute();
+                    }
+                    
+                    // Set session variables
+                    $_SESSION['auth_token'] = $devToken;
+                    $_SESSION['authenticated'] = true;
+                    $_SESSION['user_id'] = $user['id'];
+                    $_SESSION['user_code'] = $user['user_code'];
+                    $_SESSION['user_name'] = $user['name'];
+                    $_SESSION['user_email'] = $user['email'];
+                    $_SESSION['user_level'] = $user['level'];
+                    $_SESSION['login_time'] = time();
+                    $_SESSION['dev_mode'] = true;
+                    
+                    // Set cookie
+                    setcookie('auth_token', $devToken, time() + 86400, '/', '', false, true);
+                    
+                    error_log("DEV MODE: Auto-logged in as {$user['user_code']} ({$user['name']})");
+                    
+                    // Redirect to route
+                    header('Location: /panel/route.php');
+                    exit;
+                }
+                
+                $devConn->close();
+            }
+        } catch (Exception $e) {
+            error_log("DEV MODE ERROR: " . $e->getMessage());
+            // Continue to show login form
+        }
+    } else {
+        // Already authenticated in dev mode - redirect
+        header('Location: /panel/dashboard.php');
+        exit;
+    }
+}
+
+// ============================================================================
+// NORMAL AUTH CHECK (Production mode)
+// ============================================================================
 Session::start();
 
-// Redirect if already logged in
+// Check if already logged in (production mode)
 if (Auth::check()) {
-    $redirect = $_SESSION['intended_url'] ?? '/panel/dashboard.php';
-    unset($_SESSION['intended_url']);
-    header('Location: ' . $redirect);
+    header('Location: /panel/route.php');
     exit;
 }
 
 $error = null;
 
-// Handle login form submission
+// Handle login
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         // Verify CSRF
         if (!CSRFToken::verifyRequest()) {
-            throw new Exception('Invalid session. Please refresh and try again.');
+            throw new Exception('Invalid request. Please refresh and try again.');
         }
         
         $identifier = trim($_POST['identifier'] ?? '');
         $password = $_POST['password'] ?? '';
         $remember = isset($_POST['remember']);
         
-        // Validate input
         if (empty($identifier) || empty($password)) {
-            throw new Exception('Email/user code and password are required');
+            throw new Exception('User code/Email and password are required');
         }
         
-        // Attempt Login
+        // Attempt login
         if (Auth::attempt($identifier, $password, $remember)) {
-            // SUCCESS - Get redirect URL
-            $redirect = $_SESSION['intended_url'] ?? '/panel/dashboard.php';
-            unset($_SESSION['intended_url']);
-            
-            // Redirect to dashboard
-            header('Location: ' . $redirect);
+            // Success - redirect
+            header('Location: /panel/dashboard.php');
             exit;
         } else {
-            // FAILURE
             $error = 'Invalid email/user code or password';
         }
         
@@ -71,26 +150,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    
     <title>Login - ProConsultancy</title>
     
-    <!-- Favicon -->
     <link rel="icon" type="image/x-icon" href="/panel/assets/images/favicon.ico">
-    
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    
-    <!-- Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/boxicons@2.1.4/css/boxicons.min.css">
-    
-    <!-- Bootstrap CSS -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     
     <style>
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Inter', sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
@@ -98,7 +167,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             justify-content: center;
             padding: 20px;
         }
-        
         .login-container {
             background: white;
             border-radius: 16px;
@@ -107,47 +175,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             max-width: 450px;
             overflow: hidden;
         }
-        
         .login-header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             padding: 40px 30px;
             text-align: center;
         }
-        
         .login-header h1 {
             font-size: 28px;
             font-weight: 700;
             margin: 0 0 10px 0;
         }
-        
-        .login-header p {
-            margin: 0;
-            opacity: 0.9;
-        }
-        
         .login-body {
             padding: 40px 30px;
         }
-        
-        .form-label {
-            font-weight: 500;
-            margin-bottom: 8px;
-            color: #2d3748;
-        }
-        
         .form-control {
             padding: 12px 16px;
             border: 1px solid #e2e8f0;
             border-radius: 8px;
-            font-size: 15px;
         }
-        
-        .form-control:focus {
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-        
         .btn-login {
             width: 100%;
             padding: 14px;
@@ -156,47 +202,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border-radius: 8px;
             color: white;
             font-weight: 600;
-            font-size: 16px;
-            transition: transform 0.2s;
         }
-        
-        .btn-login:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
-        }
-        
         .alert {
             border-radius: 8px;
-            padding: 12px 16px;
         }
-        
-        .forgot-password {
-            text-align: center;
-            margin-top: 20px;
-        }
-        
-        .forgot-password a {
-            color: #667eea;
-            text-decoration: none;
-            font-weight: 500;
-        }
-        
-        .forgot-password a:hover {
-            text-decoration: underline;
-        }
-        
-        .input-group-text {
-            background: white;
-            border: 1px solid #e2e8f0;
-            border-right: none;
-        }
-        
-        .form-control.with-icon {
-            border-left: none;
+        .dev-mode-notice {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #f59e0b;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            z-index: 9999;
         }
     </style>
 </head>
 <body>
+    <?php if (defined('DEV_MODE') && DEV_MODE && defined('DEV_SHOW_BANNER') && DEV_SHOW_BANNER): ?>
+    <div class="dev-mode-notice">
+        🔧 DEV MODE: Auto-redirecting to dashboard...
+    </div>
+    <?php endif; ?>
+    
     <div class="login-container">
         <div class="login-header">
             <h1><i class="bx bx-briefcase"></i> ProConsultancy</h1>
@@ -205,60 +236,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         <div class="login-body">
             <?php if ($error): ?>
-            <div class="alert alert-danger" role="alert">
+            <div class="alert alert-danger">
                 <i class="bx bx-error-circle me-2"></i>
                 <?= htmlspecialchars($error) ?>
             </div>
             <?php endif; ?>
             
-            <form method="POST" action="" autocomplete="off">
+            <form method="POST" action="">
                 <?= CSRFToken::field() ?>
                 
                 <div class="mb-3">
-                    <label for="identifier" class="form-label">Email or User Code</label>
-                    <div class="input-group">
-                        <span class="input-group-text">
-                            <i class="bx bx-user"></i>
-                        </span>
-                        <input type="text" 
-                               class="form-control with-icon" 
-                               id="identifier" 
-                               name="identifier" 
-                               placeholder="Enter your email or user code"
-                               value="<?= htmlspecialchars($_POST['identifier'] ?? '') ?>"
-                               required
-                               autofocus>
-                    </div>
-                    <small class="form-text text-muted">
-                        You can login with either your email or user code
-                    </small>
+                    <label class="form-label">User Code or Email</label>
+                    <input type="text" 
+                           class="form-control" 
+                           name="identifier" 
+                           placeholder="Enter your user code or email"
+                           value="<?= htmlspecialchars($_POST['identifier'] ?? '') ?>"
+                           required
+                           autofocus>
                 </div>
                 
                 <div class="mb-3">
-                    <label for="password" class="form-label">Password</label>
-                    <div class="input-group">
-                        <span class="input-group-text">
-                            <i class="bx bx-lock-alt"></i>
-                        </span>
-                        <input type="password" 
-                               class="form-control with-icon" 
-                               id="password" 
-                               name="password" 
-                               placeholder="Enter your password"
-                               required>
-                        <button class="btn btn-outline-secondary" 
-                                type="button" 
-                                id="togglePassword"
-                                style="border-left: none;">
-                            <i class="bx bx-show"></i>
-                        </button>
-                    </div>
+                    <label class="form-label">Password</label>
+                    <input type="password" 
+                           class="form-control" 
+                           name="password" 
+                           placeholder="Enter your password"
+                           required>
                 </div>
                 
                 <div class="mb-3 form-check">
-                    <input type="checkbox" class="form-check-input" id="remember" name="remember">
+                    <input type="checkbox" class="form-check-input" name="remember" id="remember">
                     <label class="form-check-label" for="remember">
-                        Remember me for 30 days
+                        Remember me
                     </label>
                 </div>
                 
@@ -267,30 +277,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </button>
             </form>
             
-            <div class="forgot-password">
-                <a href="/panel/forgot-password.php">
+            <div style="text-align: center; margin-top: 20px;">
+                <a href="/panel/forgot-password.php" style="color: #667eea;">
                     <i class="bx bx-lock-open me-1"></i>Forgot your password?
                 </a>
             </div>
         </div>
     </div>
-    
-    <script>
-        // Toggle password visibility
-        document.getElementById('togglePassword').addEventListener('click', function() {
-            const password = document.getElementById('password');
-            const icon = this.querySelector('i');
-            
-            if (password.type === 'password') {
-                password.type = 'text';
-                icon.classList.remove('bx-show');
-                icon.classList.add('bx-hide');
-            } else {
-                password.type = 'password';
-                icon.classList.remove('bx-hide');
-                icon.classList.add('bx-show');
-            }
-        });
-    </script>
 </body>
 </html>
