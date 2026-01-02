@@ -5,7 +5,7 @@ namespace ProConsultancy\Core;
  * CSRF Token Protection
  * Prevents Cross-Site Request Forgery attacks
  * 
- * @version 5.0
+ * @version 2.0
  */
 class CSRFToken {
     /**

@@ -100,8 +100,8 @@ if (defined('DEV_MODE') && DEV_MODE === true) {
                 if (!$stmt) {
                     error_log("DEV MODE ERROR: Failed to prepare statement - " . $devConn->error);
                 } else {
-                    
-                    $stmt->bind_param("s", DEV_USER_CODE);
+                    $devUserCode = DEV_USER_CODE;
+                    $stmt->bind_param("s", $devUserCode);
                     $stmt->execute();
                     $result = $stmt->get_result();
                     
@@ -125,7 +125,9 @@ if (defined('DEV_MODE') && DEV_MODE === true) {
                             );
                             
                             if ($insertStmt) {
-                                $insertStmt->bind_param("ssi", DEV_USER_CODE, $devToken, $expiryDays);
+                                $devUserCode = DEV_USER_CODE;
+                                $insertStmt->bind_param("ssi", $devUserCode, $devToken, $expiryDays);
+
                                 
                                 if (!$insertStmt->execute()) {
                                     error_log("DEV MODE ERROR: Failed to insert token - " . $devConn->error);

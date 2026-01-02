@@ -1,37 +1,65 @@
 <?php
 /**
  * Login Page - TOKEN BASED with DEV MODE
+ * 
+ * @version 5.0 - Fixed class loading order
  */
 
-// Define PANEL_ACCESS before loading config
+// Define PANEL_ACCESS before loading anything
 if (!defined('PANEL_ACCESS')) {
     define('PANEL_ACCESS', true);
 }
 
+// Define paths
 if (!defined('ROOT_PATH')) {
-    define('ROOT_PATH', dirname(dirname(__DIR__)));
+    define('ROOT_PATH', dirname(__DIR__));
 }
 
 if (!defined('INCLUDES_PATH')) {
     define('INCLUDES_PATH', ROOT_PATH . '/includes');
 }
 
-// Load configuration
-require_once __DIR__ . '/../includes/config/app.php';
-require_once __DIR__ . '/../includes/Core/Database.php';
-require_once __DIR__ . '/../includes/Core/Session.php';
-require_once __DIR__ . '/../includes/Core/Auth.php';
-require_once __DIR__ . '/../includes/Core/CSRFToken.php';
+// ============================================================================
+// AUTOLOADER - Load this FIRST
+// ============================================================================
+spl_autoload_register(function ($class) {
+    $prefix = 'ProConsultancy\\';
+    $base_dir = INCLUDES_PATH . '/';
+    
+    $len = strlen($prefix);
+    if (strncmp($prefix, $class, $len) !== 0) {
+        return;
+    }
+    
+    $relative_class = substr($class, $len);
+    $file = $base_dir . str_replace('\\', '/', $relative_class) . '.php';
+    
+    if (file_exists($file)) {
+        require $file;
+    }
+});
 
+// ============================================================================
+// LOAD CONFIGURATION - This defines DEV_MODE, DB constants, etc.
+// ============================================================================
+require_once INCLUDES_PATH . '/config/config.php';
+
+// ============================================================================
+// NOW we can safely use namespaced classes
+// ============================================================================
 use ProConsultancy\Core\Auth;
 use ProConsultancy\Core\Session;
 use ProConsultancy\Core\CSRFToken;
 
 // ============================================================================
+// START SESSION
+// ============================================================================
+Session::start();
+
+// ============================================================================
 // DEV MODE: Auto-login and redirect
 // ============================================================================
 if (defined('DEV_MODE') && DEV_MODE && defined('DEV_AUTO_LOGIN') && DEV_AUTO_LOGIN) {
-    Session::start();
     
     // If not authenticated, setup dev login
     if (!isset($_SESSION['authenticated']) || $_SESSION['authenticated'] !== true) {
@@ -42,13 +70,14 @@ if (defined('DEV_MODE') && DEV_MODE && defined('DEV_AUTO_LOGIN') && DEV_AUTO_LOG
                 mysqli_set_charset($devConn, 'utf8mb4');
                 
                 $stmt = $devConn->prepare("SELECT * FROM users WHERE user_code = ? AND is_active = 1 LIMIT 1");
-                $stmt->bind_param("s", DEV_USER_CODE);
+                $devUserCode = defined('DEV_USER_CODE') ? DEV_USER_CODE : 'ADMIN';
+                $stmt->bind_param("s", $devUserCode);
                 $stmt->execute();
                 $result = $stmt->get_result();
                 
                 if ($user = $result->fetch_assoc()) {
                     // Create dev token
-                    $devToken = 'DEV_TOKEN_' . md5(DEV_USER_CODE . 'proconsultancy');
+                    $devToken = 'DEV_TOKEN_' . md5($devUserCode . 'proconsultancy');
                     
                     // Check if dev token exists
                     $checkStmt = $devConn->prepare("SELECT id FROM tokens WHERE token = ?");
@@ -63,7 +92,7 @@ if (defined('DEV_MODE') && DEV_MODE && defined('DEV_AUTO_LOGIN') && DEV_AUTO_LOG
                             "INSERT INTO tokens (user_code, token, expires_at, ip_address, user_agent, created_at) 
                              VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? DAY), '127.0.0.1', 'DEV_MODE', NOW())"
                         );
-                        $insertStmt->bind_param("ssi", DEV_USER_CODE, $devToken, $expiryDays);
+                        $insertStmt->bind_param("ssi", $devUserCode, $devToken, $expiryDays);
                         $insertStmt->execute();
                     }
                     
@@ -83,8 +112,8 @@ if (defined('DEV_MODE') && DEV_MODE && defined('DEV_AUTO_LOGIN') && DEV_AUTO_LOG
                     
                     error_log("DEV MODE: Auto-logged in as {$user['user_code']} ({$user['name']})");
                     
-                    // Redirect to route
-                    header('Location: /panel/route.php');
+                    // Redirect to dashboard
+                    header('Location: /panel/dashboard.php');
                     exit;
                 }
                 
@@ -104,11 +133,10 @@ if (defined('DEV_MODE') && DEV_MODE && defined('DEV_AUTO_LOGIN') && DEV_AUTO_LOG
 // ============================================================================
 // NORMAL AUTH CHECK (Production mode)
 // ============================================================================
-Session::start();
 
 // Check if already logged in (production mode)
 if (Auth::check()) {
-    header('Location: /panel/route.php');
+    header('Location: /panel/dashboard.php');
     exit;
 }
 
@@ -118,7 +146,7 @@ $error = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         // Verify CSRF
-        if (!CSRFToken::verifyRequest()) {
+        if (!CSRFToken::verify($_POST['csrf_token'] ?? '')) {
             throw new Exception('Invalid request. Please refresh and try again.');
         }
         
@@ -194,6 +222,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border: 1px solid #e2e8f0;
             border-radius: 8px;
         }
+        .form-control:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
         .btn-login {
             width: 100%;
             padding: 14px;
@@ -202,6 +234,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border-radius: 8px;
             color: white;
             font-weight: 600;
+            transition: transform 0.2s;
+        }
+        .btn-login:hover {
+            transform: translateY(-2px);
         }
         .alert {
             border-radius: 8px;
@@ -213,25 +249,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             transform: translateX(-50%);
             background: #f59e0b;
             color: white;
-            padding: 10px 20px;
+            padding: 12px 24px;
             border-radius: 8px;
             font-size: 14px;
-            font-weight: bold;
+            font-weight: 600;
             z-index: 9999;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         }
     </style>
 </head>
 <body>
     <?php if (defined('DEV_MODE') && DEV_MODE && defined('DEV_SHOW_BANNER') && DEV_SHOW_BANNER): ?>
     <div class="dev-mode-notice">
-        🔧 DEV MODE: Auto-redirecting to dashboard...
+        🔧 DEV MODE ACTIVE - Auto-login enabled
     </div>
     <?php endif; ?>
     
     <div class="login-container">
         <div class="login-header">
             <h1><i class="bx bx-briefcase"></i> ProConsultancy</h1>
-            <p>Professional Recruitment Management</p>
+            <p class="mb-0">Professional Recruitment Management</p>
         </div>
         
         <div class="login-body">
@@ -246,7 +283,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <?= CSRFToken::field() ?>
                 
                 <div class="mb-3">
-                    <label class="form-label">User Code or Email</label>
+                    <label class="form-label fw-semibold">User Code or Email</label>
                     <input type="text" 
                            class="form-control" 
                            name="identifier" 
@@ -257,7 +294,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
                 
                 <div class="mb-3">
-                    <label class="form-label">Password</label>
+                    <label class="form-label fw-semibold">Password</label>
                     <input type="password" 
                            class="form-control" 
                            name="password" 
@@ -265,10 +302,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                            required>
                 </div>
                 
-                <div class="mb-3 form-check">
+                <div class="mb-4 form-check">
                     <input type="checkbox" class="form-check-input" name="remember" id="remember">
                     <label class="form-check-label" for="remember">
-                        Remember me
+                        Remember me for 30 days
                     </label>
                 </div>
                 
@@ -277,11 +314,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </button>
             </form>
             
-            <div style="text-align: center; margin-top: 20px;">
-                <a href="/panel/forgot-password.php" style="color: #667eea;">
+            <?php if (!defined('DEV_MODE') || !DEV_MODE): ?>
+            <div class="text-center mt-4">
+                <a href="/panel/forgot-password.php" class="text-decoration-none" style="color: #667eea;">
                     <i class="bx bx-lock-open me-1"></i>Forgot your password?
                 </a>
             </div>
+            <?php endif; ?>
+            
+            <?php if (defined('DEV_MODE') && DEV_MODE): ?>
+            <div class="alert alert-warning mt-4 mb-0">
+                <small>
+                    <i class="bx bx-info-circle me-1"></i>
+                    <strong>Dev Mode:</strong> You can login with any credentials or wait for auto-login
+                </small>
+            </div>
+            <?php endif; ?>
         </div>
     </div>
 </body>

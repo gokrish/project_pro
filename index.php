@@ -1,2 +1,1 @@
-<?php
-require __DIR__ . '/../panel/login.php';
+<?php require __DIR__ . '/panel/login.php';

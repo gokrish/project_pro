@@ -3,8 +3,7 @@
  * Application Constants
  * Defines all constants used throughout the application
  * 
- * @package ProConsultancy
- * @version 5.0
+ * @version 2.0
  */
 
 // Prevent direct access
@@ -22,10 +21,10 @@ define('ROLE_SENIOR_RECRUITER', 'senior_recruiter');
 define('ROLE_RECRUITER', 'recruiter');
 define('ROLE_COORDINATOR', 'coordinator');
 define('ROLE_USER', 'user');
-define('APP_VERSION', '2.0.0');
+// define('APP_VERSION', '2.0.0');
 define('DEBUG_MODE', $_ENV['APP_DEBUG'] ?? false);
-define('LOG_LEVEL', $_ENV['LOG_LEVEL'] ?? 'error');
-define('MAX_LOGIN_ATTEMPTS', 5);
+// define('LOG_LEVEL', $_ENV['LOG_LEVEL'] ?? 'error');
+// define('MAX_LOGIN_ATTEMPTS', 5);
 define('SESSION_TIMEOUT', 3600);
 define('CSRF_TOKEN_EXPIRE', 7200);
 // All available roles
