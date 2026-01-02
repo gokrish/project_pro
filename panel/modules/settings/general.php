@@ -1,142 +1,230 @@
 <?php
 /**
- * General Settings
- * File: panel/modules/settings/general.php
+ * Settings - General Settings
+ * SIMPLIFIED: Password Change ONLY
+ * 
+ * @version 5.0 - Production Ready
  */
 
 require_once __DIR__ . '/../_common.php';
 
-use ProConsultancy\Core\Permission;
-use ProConsultancy\Core\Database;
-use ProConsultancy\Core\CSRFToken;
+use ProConsultancy\Core\{CSRFToken, Auth};
 
-// Check permission
-Permission::require('settings', 'edit_general');
+// Get current user
+$currentUser = Auth::user();
 
-$db = Database::getInstance();
-$conn = $db->getConnection();
-
-// Fetch current settings
-$settingsQuery = "SELECT setting_key, setting_value FROM system_settings WHERE setting_key LIKE 'general_%'";
-$result = $conn->query($settingsQuery);
-$settings = [];
-while ($row = $result->fetch_assoc()) {
-    $settings[$row['setting_key']] = $row['setting_value'];
-}
-
+// Page config
 $pageTitle = 'General Settings';
-require_once ROOT_PATH . '/panel/includes/header.php';
+$breadcrumbs = [
+    ['title' => 'Settings', 'url' => '#'],
+    ['title' => 'General', 'url' => '']
+];
+
+require_once __DIR__ . '/../../includes/header.php';
 ?>
 
 <div class="container-xxl flex-grow-1 container-p-y">
-    <h4 class="fw-bold py-3 mb-4">
-        <span class="text-muted fw-light">Settings /</span> General
-    </h4>
+    
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h4 class="mb-1">
+                <i class="bx bx-cog me-2"></i>
+                General Settings
+            </h4>
+            <p class="text-muted mb-0">Manage your account settings</p>
+        </div>
+    </div>
 
-    <?php require_once ROOT_PATH . '/panel/includes/flash-messages.php'; ?>
+    <?php require_once __DIR__ . '/../../includes/flash-messages.php'; ?>
 
     <div class="row">
-        <div class="col-md-12">
-            <div class="card mb-4">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0">General Settings</h5>
+        <div class="col-lg-8">
+            <!-- Change Password -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="bx bx-key"></i> Change Password
+                    </h5>
                 </div>
                 <div class="card-body">
-                    <form method="POST" action="handlers/update_general.php">
+                    <form method="POST" action="/panel/modules/settings/handlers/change_password.php" id="changePasswordForm">
                         <input type="hidden" name="csrf_token" value="<?= CSRFToken::generate() ?>">
                         
-                        <!-- Application Name -->
-                        <div class="row mb-3">
-                            <label class="col-sm-3 col-form-label">Application Name</label>
-                            <div class="col-sm-9">
-                                <input type="text" 
+                        <!-- Current Password -->
+                        <div class="mb-3">
+                            <label class="form-label">Current Password <span class="text-danger">*</span></label>
+                            <div class="input-group">
+                                <input type="password" 
+                                       name="current_password" 
+                                       id="current_password"
                                        class="form-control" 
-                                       name="general_app_name" 
-                                       value="<?= escape($settings['general_app_name'] ?? 'ProConsultancy ATS') ?>"
+                                       placeholder="Enter your current password"
                                        required>
-                                <small class="text-muted">Displayed in browser title and emails</small>
-                            </div>
-                        </div>
-
-                        <!-- Timezone -->
-                        <div class="row mb-3">
-                            <label class="col-sm-3 col-form-label">Timezone</label>
-                            <div class="col-sm-9">
-                                <select class="form-select" name="general_timezone">
-                                    <option value="Europe/Brussels" <?= ($settings['general_timezone'] ?? '') === 'Europe/Brussels' ? 'selected' : '' ?>>Brussels (Europe/Brussels)</option>
-                                    <option value="America/New_York" <?= ($settings['general_timezone'] ?? '') === 'America/New_York' ? 'selected' : '' ?>>New York (America/New_York)</option>
-                                    <option value="America/Chicago" <?= ($settings['general_timezone'] ?? '') === 'America/Chicago' ? 'selected' : '' ?>>Chicago (America/Chicago)</option>
-                                    <option value="America/Los_Angeles" <?= ($settings['general_timezone'] ?? '') === 'America/Los_Angeles' ? 'selected' : '' ?>>Los Angeles (America/Los_Angeles)</option>
-                                    <option value="Europe/London" <?= ($settings['general_timezone'] ?? '') === 'Europe/London' ? 'selected' : '' ?>>London (Europe/London)</option>
-                                    <option value="Asia/Dubai" <?= ($settings['general_timezone'] ?? '') === 'Asia/Dubai' ? 'selected' : '' ?>>Dubai (Asia/Dubai)</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <!-- Date Format -->
-                        <div class="row mb-3">
-                            <label class="col-sm-3 col-form-label">Date Format</label>
-                            <div class="col-sm-9">
-                                <select class="form-select" name="general_date_format">
-                                    <option value="Y-m-d" <?= ($settings['general_date_format'] ?? '') === 'Y-m-d' ? 'selected' : '' ?>>YYYY-MM-DD</option>
-                                    <option value="d/m/Y" <?= ($settings['general_date_format'] ?? '') === 'd/m/Y' ? 'selected' : '' ?>>DD/MM/YYYY</option>
-                                    <option value="m/d/Y" <?= ($settings['general_date_format'] ?? '') === 'm/d/Y' ? 'selected' : '' ?>>MM/DD/YYYY</option>
-                                    <option value="d-M-Y" <?= ($settings['general_date_format'] ?? '') === 'd-M-Y' ? 'selected' : '' ?>>DD-MMM-YYYY</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <!-- Time Format -->
-                        <div class="row mb-3">
-                            <label class="col-sm-3 col-form-label">Time Format</label>
-                            <div class="col-sm-9">
-                                <select class="form-select" name="general_time_format">
-                                    <option value="H:i" <?= ($settings['general_time_format'] ?? '') === 'H:i' ? 'selected' : '' ?>>24-hour (14:30)</option>
-                                    <option value="g:i A" <?= ($settings['general_time_format'] ?? '') === 'g:i A' ? 'selected' : '' ?>>12-hour (2:30 PM)</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <!-- Default Currency -->
-                        <div class="row mb-3">
-                            <label class="col-sm-3 col-form-label">Default Currency</label>
-                            <div class="col-sm-9">
-                                <select class="form-select" name="general_currency">
-                                    <option value="EUR" <?= ($settings['general_currency'] ?? '') === 'EUR' ? 'selected' : '' ?>>EUR (€)</option>
-                                    <option value="USD" <?= ($settings['general_currency'] ?? '') === 'USD' ? 'selected' : '' ?>>USD ($)</option>
-                                    <option value="GBP" <?= ($settings['general_currency'] ?? '') === 'GBP' ? 'selected' : '' ?>>GBP (£)</option>
-                                    <option value="AED" <?= ($settings['general_currency'] ?? '') === 'AED' ? 'selected' : '' ?>>AED (د.إ)</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <!-- Pagination -->
-                        <div class="row mb-3">
-                            <label class="col-sm-3 col-form-label">Items Per Page</label>
-                            <div class="col-sm-9">
-                                <input type="number" 
-                                       class="form-control" 
-                                       name="general_items_per_page" 
-                                       value="<?= escape($settings['general_items_per_page'] ?? '25') ?>"
-                                       min="10" max="100">
-                                <small class="text-muted">Number of items to display per page in lists</small>
-                            </div>
-                        </div>
-
-                        <!-- Save Button -->
-                        <div class="row">
-                            <div class="col-sm-9 offset-sm-3">
-                                <button type="submit" class="btn btn-primary">
-                                    <i class="bx bx-save me-1"></i> Save Changes
+                                <button class="btn btn-outline-secondary" 
+                                        type="button"
+                                        onclick="togglePasswordVisibility('current_password')">
+                                    <i class="bx bx-show" id="current_password_icon"></i>
                                 </button>
-                                <a href="/panel/settings.php" class="btn btn-outline-secondary">Cancel</a>
                             </div>
+                        </div>
+                        
+                        <!-- New Password -->
+                        <div class="mb-3">
+                            <label class="form-label">New Password <span class="text-danger">*</span></label>
+                            <div class="input-group">
+                                <input type="password" 
+                                       name="new_password" 
+                                       id="new_password"
+                                       class="form-control" 
+                                       placeholder="Enter new password"
+                                       required
+                                       minlength="6">
+                                <button class="btn btn-outline-secondary" 
+                                        type="button"
+                                        onclick="togglePasswordVisibility('new_password')">
+                                    <i class="bx bx-show" id="new_password_icon"></i>
+                                </button>
+                            </div>
+                            <div class="form-text">
+                                <i class="bx bx-info-circle"></i>
+                                Must be at least 6 characters, contain 1 number and 1 uppercase letter
+                            </div>
+                        </div>
+                        
+                        <!-- Confirm Password -->
+                        <div class="mb-3">
+                            <label class="form-label">Confirm New Password <span class="text-danger">*</span></label>
+                            <div class="input-group">
+                                <input type="password" 
+                                       name="confirm_password" 
+                                       id="confirm_password"
+                                       class="form-control" 
+                                       placeholder="Re-enter new password"
+                                       required
+                                       minlength="6">
+                                <button class="btn btn-outline-secondary" 
+                                        type="button"
+                                        onclick="togglePasswordVisibility('confirm_password')">
+                                    <i class="bx bx-show" id="confirm_password_icon"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <hr class="my-4">
+                        
+                        <!-- Actions -->
+                        <div class="d-flex justify-content-end">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bx bx-save"></i> Change Password
+                            </button>
                         </div>
                     </form>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Help Panel -->
+        <div class="col-lg-4">
+            <!-- Password Requirements -->
+            <div class="card bg-light mb-3">
+                <div class="card-body">
+                    <h6 class="mb-3">
+                        <i class="bx bx-shield"></i> Password Requirements
+                    </h6>
+                    <ul class="mb-0 small">
+                        <li>Minimum 6 characters long</li>
+                        <li>At least 1 number (0-9)</li>
+                        <li>At least 1 uppercase letter (A-Z)</li>
+                        <li>No special characters required</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Security Tips -->
+            <div class="card bg-light">
+                <div class="card-body">
+                    <h6 class="mb-3">
+                        <i class="bx bx-bulb"></i> Security Tips
+                    </h6>
+                    <ul class="mb-0 small">
+                        <li>Change your password regularly</li>
+                        <li>Use a unique password (don't reuse)</li>
+                        <li>Never share your password</li>
+                        <li>Use a password manager</li>
+                        <li>Log out on shared computers</li>
+                    </ul>
                 </div>
             </div>
         </div>
     </div>
 </div>
 
-<?php require_once ROOT_PATH . '/panel/includes/footer.php'; ?>
+<!-- JavaScript -->
+<script>
+/**
+ * Toggle password visibility
+ */
+function togglePasswordVisibility(fieldId) {
+    const field = document.getElementById(fieldId);
+    const icon = document.getElementById(fieldId + '_icon');
+    
+    if (field.type === 'password') {
+        field.type = 'text';
+        icon.classList.remove('bx-show');
+        icon.classList.add('bx-hide');
+    } else {
+        field.type = 'password';
+        icon.classList.remove('bx-hide');
+        icon.classList.add('bx-show');
+    }
+}
+
+/**
+ * Form validation
+ */
+document.getElementById('changePasswordForm').addEventListener('submit', function(e) {
+    const currentPassword = document.getElementById('current_password').value;
+    const newPassword = document.getElementById('new_password').value;
+    const confirmPassword = document.getElementById('confirm_password').value;
+    
+    // Check if new password is different from current
+    if (currentPassword === newPassword) {
+        e.preventDefault();
+        alert('New password must be different from current password!');
+        return false;
+    }
+    
+    // Check password match
+    if (newPassword !== confirmPassword) {
+        e.preventDefault();
+        alert('New passwords do not match!');
+        return false;
+    }
+    
+    // Check password length
+    if (newPassword.length < 6) {
+        e.preventDefault();
+        alert('Password must be at least 6 characters long!');
+        return false;
+    }
+    
+    // Check for number
+    if (!/[0-9]/.test(newPassword)) {
+        e.preventDefault();
+        alert('Password must contain at least one number!');
+        return false;
+    }
+    
+    // Check for uppercase
+    if (!/[A-Z]/.test(newPassword)) {
+        e.preventDefault();
+        alert('Password must contain at least one uppercase letter!');
+        return false;
+    }
+    
+    return true;
+});
+</script>
+
+<?php require_once __DIR__ . '/../../includes/footer.php'; ?>

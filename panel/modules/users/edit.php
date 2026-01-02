@@ -1,311 +1,230 @@
 <?php
 /**
- * Edit User Form
- * File: panel/modules/users/edit.php
+ * User Management - Edit User
+ * 
+ * @version 2.0
  */
 
-// Load common bootstrap
 require_once __DIR__ . '/../_common.php';
 
-use ProConsultancy\Core\Permission;
-use ProConsultancy\Core\Database;
-use ProConsultancy\Core\CSRFToken;
-use ProConsultancy\Core\FlashMessage;
+use ProConsultancy\Core\{Permission, Database, CSRFToken, Auth};
 
 // Check permission
 Permission::require('users', 'edit');
 
-// Get user ID from query parameter
-$userId = $_GET['id'] ?? null;
-
-if (!$userId) {
-    header('Location: index.php?action=list');
-    exit();
-}
-
-// Fetch user data
 $db = Database::getInstance();
 $conn = $db->getConnection();
 
+// Get user ID from URL
+$userId = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
+
+if (!$userId) {
+    $_SESSION['flash_error'] = 'Invalid user ID';
+    header('Location: /panel/modules/users/list.php');
+    exit;
+}
+
+// Fetch user data
 $stmt = $conn->prepare("
-    SELECT u.*, r.role_code, r.role_name 
-    FROM users u
-    LEFT JOIN roles r ON u.role_id = r.id
-    WHERE u.id = ? AND u.deleted_at IS NULL
+    SELECT 
+        id, user_code, name, email, phone, level, is_active, created_at, last_login
+    FROM users
+    WHERE id = ? AND deleted_at IS NULL
 ");
 $stmt->bind_param("i", $userId);
 $stmt->execute();
-$result = $stmt->get_result();
-$user = $result->fetch_assoc();
+$userData = $stmt->get_result()->fetch_assoc();
 
-if (!$user) {
-    FlashMessage::error('User not found');
-    header('Location: index.php?action=list');
-    exit();
+if (!$userData) {
+    $_SESSION['flash_error'] = 'User not found';
+    header('Location: /panel/modules/users/list.php');
+    exit;
 }
 
-// Fetch all roles for dropdown
-$rolesResult = $conn->query("SELECT id, role_code, role_name FROM roles ORDER BY id");
-$roles = $rolesResult->fetch_all(MYSQLI_ASSOC);
+// Prevent editing own account (use profile page instead)
+$currentUser = Auth::user();
+if ($userData['user_code'] === $currentUser['user_code']) {
+    $_SESSION['flash_warning'] = 'Use "My Profile" to edit your own account';
+    header('Location: /panel/modules/users/profile.php');
+    exit;
+}
 
-// Page configuration
+// Page config
 $pageTitle = 'Edit User';
 $breadcrumbs = [
-    'Team' => 'index.php?action=list',
-    'Edit User' => '#'
+    ['title' => 'Administration', 'url' => '#'],
+    ['title' => 'Users', 'url' => '/panel/modules/users/list.php'],
+    ['title' => 'Edit', 'url' => '']
 ];
 
-// Include header
-require_once ROOT_PATH . '/panel/includes/header.php';
+require_once __DIR__ . '/../../includes/header.php';
 ?>
 
 <div class="container-xxl flex-grow-1 container-p-y">
-    <!-- Page Header -->
+    
+    <!-- Header -->
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h4 class="fw-bold mb-1">
-                <span class="text-muted fw-light">User Management /</span> Edit User
+            <h4 class="mb-1">
+                <i class="bx bx-edit me-2"></i>
+                Edit User
             </h4>
-            <p class="text-muted mb-0">Update user information and permissions</p>
+            <p class="text-muted mb-0">Update user information</p>
         </div>
         <div>
-            <a href="index.php?action=list" class="btn btn-secondary">
-                <i class="bx bx-arrow-back me-1"></i> Back to Users
+            <a href="/panel/modules/users/list.php" class="btn btn-outline-secondary">
+                <i class="bx bx-arrow-back"></i> Back to List
             </a>
         </div>
     </div>
 
-    <!-- Flash Messages -->
-    <?php require_once ROOT_PATH . '/panel/includes/flash-messages.php'; ?>
+    <?php require_once __DIR__ . '/../../includes/flash-messages.php'; ?>
 
+    <!-- Form -->
     <div class="row">
         <div class="col-lg-8">
-            <!-- User Information Card -->
-            <div class="card mb-4">
+            <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">User Information</h5>
-                    <span class="badge bg-<?= $user['is_active'] ? 'success' : 'danger' ?>">
-                        <?= $user['is_active'] ? 'Active' : 'Inactive' ?>
-                    </span>
+                    <span class="badge bg-secondary"><?= htmlspecialchars($userData['user_code']) ?></span>
                 </div>
                 <div class="card-body">
-                    <form id="userForm" method="POST" action="handlers/user_save_handler.php">
-                        <input type="hidden" name="action" value="edit">
-                        <input type="hidden" name="user_id" value="<?= $user['id'] ?>">
-                        <input type="hidden" name="token" value="<?= CSRFToken::generate() ?>">
-
-                        <!-- User Code (Read-only) -->
+                    <form method="POST" action="/panel/modules/users/handlers/update.php" id="editUserForm">
+                        <input type="hidden" name="csrf_token" value="<?= CSRFToken::generate() ?>">
+                        <input type="hidden" name="user_id" value="<?= $userData['id'] ?>">
+                        
+                        <!-- Name -->
                         <div class="mb-3">
-                            <label class="form-label">User Code</label>
+                            <label class="form-label">Full Name <span class="text-danger">*</span></label>
                             <input type="text" 
-                                   class="form-control bg-light" 
-                                   value="<?= escape($user['user_code']) ?>" 
-                                   readonly>
-                            <small class="text-muted">System generated identifier</small>
-                        </div>
-
-                        <!-- Full Name -->
-                        <div class="mb-3">
-                            <label class="form-label" for="name">
-                                Full Name <span class="text-danger">*</span>
-                            </label>
-                            <input type="text" 
-                                   class="form-control" 
-                                   id="name" 
                                    name="name" 
-                                   value="<?= escape($user['name']) ?>"
-                                   required 
-                                   maxlength="100">
+                                   class="form-control" 
+                                   value="<?= htmlspecialchars($userData['name']) ?>"
+                                   required
+                                   autofocus>
                         </div>
-
+                        
                         <!-- Email -->
                         <div class="mb-3">
-                            <label class="form-label" for="email">
-                                Email Address <span class="text-danger">*</span>
-                            </label>
+                            <label class="form-label">Email Address <span class="text-danger">*</span></label>
                             <input type="email" 
-                                   class="form-control" 
-                                   id="email" 
                                    name="email" 
-                                   value="<?= escape($user['email']) ?>"
-                                   required 
-                                   maxlength="255">
-                            <small class="text-muted">Used for login and notifications</small>
+                                   class="form-control" 
+                                   value="<?= htmlspecialchars($userData['email']) ?>"
+                                   required>
+                            <small class="text-muted">Used for login</small>
                         </div>
-
-                        <!-- Role/Level -->
-                        <div class="mb-3">
-                            <label class="form-label" for="level">
-                                Role <span class="text-danger">*</span>
-                            </label>
-                            <select class="form-select" id="level" name="level" required>
-                                <?php foreach ($roles as $role): ?>
-                                <option value="<?= escape($role['role_code']) ?>" 
-                                        <?= $user['level'] === $role['role_code'] ? 'selected' : '' ?>>
-                                    <?= escape($role['role_name']) ?>
-                                </option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-
+                        
                         <!-- Phone -->
                         <div class="mb-3">
-                            <label class="form-label" for="phone">Phone Number</label>
+                            <label class="form-label">Phone Number</label>
                             <input type="tel" 
-                                   class="form-control" 
-                                   id="phone" 
                                    name="phone" 
-                                   value="<?= escape($user['phone'] ?? '') ?>"
-                                   maxlength="20"
-                                   placeholder="+32 2 XXX XX XX">
-                        </div>
-
-                        <!-- Department -->
-                        <div class="mb-3">
-                            <label class="form-label" for="department">Department</label>
-                            <input type="text" 
                                    class="form-control" 
-                                   id="department" 
-                                   name="department" 
-                                   value="<?= escape($user['department'] ?? '') ?>"
-                                   maxlength="100"
-                                   placeholder="e.g., Recruitment">
+                                   value="<?= htmlspecialchars($userData['phone'] ?? '') ?>"
+                                   placeholder="+32 123 456 789">
                         </div>
-
-                        <!-- Position -->
+                        
+                        <!-- Role/Level -->
                         <div class="mb-3">
-                            <label class="form-label" for="position">Position</label>
-                            <input type="text" 
-                                   class="form-control" 
-                                   id="position" 
-                                   name="position" 
-                                   value="<?= escape($user['position'] ?? '') ?>"
-                                   maxlength="100"
-                                   placeholder="e.g., Senior Recruiter">
+                            <label class="form-label">Role/Level <span class="text-danger">*</span></label>
+                            <select name="level" class="form-select" required>
+                                <option value="">Select role...</option>
+                                <option value="super_admin" <?= $userData['level'] === 'super_admin' ? 'selected' : '' ?>>Super Admin - Full system access</option>
+                                <option value="admin" <?= $userData['level'] === 'admin' ? 'selected' : '' ?>>Admin - Administrative access</option>
+                                <option value="manager" <?= $userData['level'] === 'manager' ? 'selected' : '' ?>>Manager - Team management</option>
+                                <option value="senior_recruiter" <?= $userData['level'] === 'senior_recruiter' ? 'selected' : '' ?>>Senior Recruiter - Extended access</option>
+                                <option value="recruiter" <?= $userData['level'] === 'recruiter' ? 'selected' : '' ?>>Recruiter - Standard access</option>
+                                <option value="coordinator" <?= $userData['level'] === 'coordinator' ? 'selected' : '' ?>>Coordinator - Support tasks</option>
+                            </select>
                         </div>
-
-                        <hr class="my-4">
-
-                        <!-- Change Password Section -->
-                        <h6 class="mb-3">Change Password (Optional)</h6>
-                        <p class="text-muted small">Leave blank to keep current password</p>
-
-                        <!-- New Password -->
+                        
+                        <!-- Status -->
                         <div class="mb-3">
-                            <label class="form-label" for="password">New Password</label>
-                            <div class="input-group">
-                                <input type="password" 
-                                       class="form-control" 
-                                       id="password" 
-                                       name="password" 
-                                       minlength="8"
-                                       placeholder="Enter new password">
-                                <button class="btn btn-outline-secondary" type="button" id="togglePassword">
-                                    <i class="bx bx-show"></i>
-                                </button>
+                            <label class="form-label">Status</label>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" 
+                                       type="checkbox" 
+                                       name="is_active" 
+                                       value="1"
+                                       <?= $userData['is_active'] ? 'checked' : '' ?>
+                                       id="isActive">
+                                <label class="form-check-label" for="isActive">
+                                    Active (user can login)
+                                </label>
                             </div>
-                            <small class="text-muted">Minimum 8 characters</small>
                         </div>
-
-                        <!-- Confirm Password -->
-                        <div class="mb-3">
-                            <label class="form-label" for="password_confirmation">Confirm New Password</label>
-                            <input type="password" 
-                                   class="form-control" 
-                                   id="password_confirmation" 
-                                   name="password_confirmation"
-                                   placeholder="Confirm new password">
+                        
+                        <hr class="my-4">
+                        
+                        <!-- Password Change Section -->
+                        <div class="alert alert-info">
+                            <i class="bx bx-info-circle"></i>
+                            <strong>Password:</strong> To reset this user's password, use the "Reset Password" button in the user list.
                         </div>
-
-                        <!-- Form Actions -->
-                        <div class="d-flex justify-content-between mt-4">
-                            <a href="index.php?action=list" class="btn btn-label-secondary">
-                                Cancel
+                        
+                        <!-- Actions -->
+                        <div class="d-flex justify-content-between">
+                            <a href="/panel/modules/users/list.php" class="btn btn-outline-secondary">
+                                <i class="bx bx-x"></i> Cancel
                             </a>
                             <button type="submit" class="btn btn-primary">
-                                <i class="bx bx-save me-1"></i> Save Changes
+                                <i class="bx bx-save"></i> Update User
                             </button>
                         </div>
                     </form>
                 </div>
             </div>
         </div>
-
+        
+        <!-- Info Panel -->
         <div class="col-lg-4">
-            <!-- User Stats Card -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h6 class="mb-0">Account Information</h6>
-                </div>
+            <!-- Account Info -->
+            <div class="card mb-3">
                 <div class="card-body">
-                    <div class="mb-3">
-                        <small class="text-muted">Created</small>
-                        <div><?= formatDateTime($user['created_at']) ?></div>
-                    </div>
-                    <div class="mb-3">
-                        <small class="text-muted">Last Login</small>
-                        <div><?= $user['last_login'] ? formatDateTime($user['last_login']) : 'Never' ?></div>
-                    </div>
-                    <div class="mb-3">
-                        <small class="text-muted">Password Last Changed</small>
-                        <div><?= $user['password_changed_at'] ? formatDateTime($user['password_changed_at']) : 'Never' ?></div>
-                    </div>
-                    <div class="mb-3">
-                        <small class="text-muted">Failed Login Attempts</small>
-                        <div>
-                            <span class="badge bg-<?= $user['failed_login_attempts'] > 0 ? 'warning' : 'success' ?>">
-                                <?= $user['failed_login_attempts'] ?>
-                            </span>
-                        </div>
-                    </div>
-                    <?php if ($user['locked_until']): ?>
-                    <div class="mb-0">
-                        <small class="text-muted">Account Locked Until</small>
-                        <div class="text-danger"><?= formatDateTime($user['locked_until']) ?></div>
-                    </div>
-                    <?php endif; ?>
+                    <h6 class="mb-3">
+                        <i class="bx bx-info-circle"></i> Account Info
+                    </h6>
+                    <dl class="row mb-0">
+                        <dt class="col-sm-5 text-muted small">User Code:</dt>
+                        <dd class="col-sm-7 small"><?= htmlspecialchars($userData['user_code']) ?></dd>
+                        
+                        <dt class="col-sm-5 text-muted small">Created:</dt>
+                        <dd class="col-sm-7 small"><?= date('M d, Y', strtotime($userData['created_at'])) ?></dd>
+                        
+                        <dt class="col-sm-5 text-muted small">Last Login:</dt>
+                        <dd class="col-sm-7 small">
+                            <?php if ($userData['last_login']): ?>
+                                <?= date('M d, Y H:i', strtotime($userData['last_login'])) ?>
+                            <?php else: ?>
+                                <span class="text-muted">Never</span>
+                            <?php endif; ?>
+                        </dd>
+                    </dl>
                 </div>
             </div>
-
-            <!-- Quick Actions Card -->
+            
+            <!-- Quick Actions -->
             <div class="card">
-                <div class="card-header">
-                    <h6 class="mb-0">Quick Actions</h6>
-                </div>
                 <div class="card-body">
-                    <?php if (Permission::can('users', 'toggle_status')): ?>
-                    <button type="button" 
-                            class="btn btn-<?= $user['is_active'] ? 'warning' : 'success' ?> w-100 mb-2"
-                            onclick="toggleUserStatus(<?= $user['id'] ?>)">
-                        <i class="bx bx-power-off me-1"></i>
-                        <?= $user['is_active'] ? 'Deactivate' : 'Activate' ?> Account
-                    </button>
-                    <?php endif; ?>
+                    <h6 class="mb-3">
+                        <i class="bx bx-cog"></i> Quick Actions
+                    </h6>
                     
                     <?php if (Permission::can('users', 'reset_password')): ?>
                     <button type="button" 
-                            class="btn btn-info w-100 mb-2"
-                            onclick="sendPasswordReset(<?= $user['id'] ?>)">
-                        <i class="bx bx-envelope me-1"></i>
-                        Send Password Reset
+                            class="btn btn-outline-warning btn-sm w-100 mb-2"
+                            onclick="resetPassword(<?= $userData['id'] ?>, '<?= htmlspecialchars($userData['name']) ?>')">
+                        <i class="bx bx-key"></i> Reset Password
                     </button>
                     <?php endif; ?>
                     
-                    <?php if ($user['failed_login_attempts'] > 0 || $user['locked_until']): ?>
+                    <?php if (Permission::can('users', 'toggle_status')): ?>
                     <button type="button" 
-                            class="btn btn-warning w-100 mb-2"
-                            onclick="unlockAccount(<?= $user['id'] ?>)">
-                        <i class="bx bx-lock-open me-1"></i>
-                        Unlock Account
-                    </button>
-                    <?php endif; ?>
-                    
-                    <?php if (Permission::can('users', 'delete')): ?>
-                    <button type="button" 
-                            class="btn btn-danger w-100"
-                            onclick="deleteUser(<?= $user['id'] ?>, '<?= escape($user['name']) ?>')">
-                        <i class="bx bx-trash me-1"></i>
-                        Delete User
+                            class="btn btn-outline-<?= $userData['is_active'] ? 'danger' : 'success' ?> btn-sm w-100"
+                            onclick="toggleStatus(<?= $userData['id'] ?>, <?= $userData['is_active'] ? 0 : 1 ?>)">
+                        <i class="bx bx-<?= $userData['is_active'] ? 'x-circle' : 'check-circle' ?>"></i> 
+                        <?= $userData['is_active'] ? 'Deactivate' : 'Activate' ?> User
                     </button>
                     <?php endif; ?>
                 </div>
@@ -314,145 +233,57 @@ require_once ROOT_PATH . '/panel/includes/header.php';
     </div>
 </div>
 
+<!-- JavaScript -->
 <script>
-// Toggle password visibility
-document.getElementById('togglePassword').addEventListener('click', function() {
-    const password = document.getElementById('password');
-    const icon = this.querySelector('i');
-    
-    if (password.type === 'password') {
-        password.type = 'text';
-        icon.classList.remove('bx-show');
-        icon.classList.add('bx-hide');
-    } else {
-        password.type = 'password';
-        icon.classList.remove('bx-hide');
-        icon.classList.add('bx-show');
+function resetPassword(userId, userName) {
+    if (!confirm(`Reset password for ${userName}?\n\nA new temporary password will be generated.`)) {
+        return;
     }
-});
-
-// Password confirmation validation
-document.getElementById('password_confirmation').addEventListener('input', function() {
-    const password = document.getElementById('password').value;
-    const confirmation = this.value;
     
-    if (password && confirmation && password !== confirmation) {
-        this.setCustomValidity('Passwords do not match');
-    } else {
-        this.setCustomValidity('');
-    }
-});
-
-// Form submission
-document.getElementById('userForm').addEventListener('submit', function(e) {
-    e.preventDefault();
-    
-    const formData = new FormData(this);
-    
-    fetch('handlers/user_save_handler.php', {
+    fetch('/panel/modules/users/handlers/reset_password.php', {
         method: 'POST',
-        body: formData
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: `user_id=${userId}`
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            alert(data.message);
-            window.location.href = 'index.php?action=list';
+            alert(`Password reset successful!\n\nNew password: ${data.new_password}\n\nPlease save this and share with the user.`);
         } else {
-            alert('Error: ' + data.message);
+            alert('Error: ' + (data.message || 'Failed to reset password'));
         }
     })
     .catch(error => {
         console.error('Error:', error);
-        alert('An error occurred while saving the user');
+        alert('An error occurred. Please try again.');
     });
-});
+}
 
-// Toggle user status
-function toggleUserStatus(userId) {
-    if (!confirm('Are you sure you want to toggle this user\'s status?')) {
+function toggleStatus(userId, newStatus) {
+    const action = newStatus === 1 ? 'activate' : 'deactivate';
+    
+    if (!confirm(`Are you sure you want to ${action} this user?`)) {
         return;
     }
     
-    const formData = new FormData();
-    formData.append('user_id', userId);
-    
-    fetch('handlers/toggle_status.php', {
+    fetch('/panel/modules/users/handlers/toggle_status.php', {
         method: 'POST',
-        body: formData
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: `user_id=${userId}&status=${newStatus}`
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            location.reload();
+            window.location.reload();
         } else {
-            alert('Error: ' + data.message);
+            alert('Error: ' + (data.message || 'Failed to update status'));
         }
-    });
-}
-
-// Send password reset
-function sendPasswordReset(userId) {
-    if (!confirm('Send password reset email to this user?')) {
-        return;
-    }
-    
-    const formData = new FormData();
-    formData.append('user_id', userId);
-    
-    fetch('handlers/reset_password.php', {
-        method: 'POST',
-        body: formData
     })
-    .then(response => response.json())
-    .then(data => {
-        alert(data.message);
-    });
-}
-
-// Unlock account
-function unlockAccount(userId) {
-    const formData = new FormData();
-    formData.append('user_id', userId);
-    formData.append('action', 'unlock');
-    
-    fetch('handlers/toggle_status.php', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            location.reload();
-        } else {
-            alert('Error: ' + data.message);
-        }
-    });
-}
-
-// Delete user
-function deleteUser(userId, userName) {
-    if (!confirm(`Are you sure you want to delete ${userName}? This action cannot be undone.`)) {
-        return;
-    }
-    
-    const formData = new FormData();
-    formData.append('user_id', userId);
-    
-    fetch('handlers/delete_user.php', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            alert(data.message);
-            window.location.href = 'index.php?action=list';
-        } else {
-            alert('Error: ' + data.message);
-        }
+    .catch(error => {
+        console.error('Error:', error);
+        alert('An error occurred. Please try again.');
     });
 }
 </script>
 
-<?php require_once ROOT_PATH . '/panel/includes/footer.php'; ?>
+<?php require_once __DIR__ . '/../../includes/footer.php'; ?>

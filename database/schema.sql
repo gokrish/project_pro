@@ -242,24 +242,36 @@ CREATE TABLE `users` (
     `role_id` INT UNSIGNED NULL,
     `name` VARCHAR(255) NOT NULL,
     `email` VARCHAR(255) UNIQUE NOT NULL,
-    `password` VARCHAR(255) NOT NULL,
-    `level` ENUM('super_admin', 'admin', 'manager', 'senior_recruiter', 'recruiter', 'user') DEFAULT 'recruiter' COMMENT 'Backward compatibility',
     `phone` VARCHAR(20),
+    `password` VARCHAR(255) NOT NULL,
+    `password_changed_at` TIMESTAMP NULL,
+    `level` ENUM('super_admin', 'admin', 'manager', 'senior_recruiter', 'recruiter', 'user') DEFAULT 'recruiter' COMMENT 'Backward compatibility',
     `is_active` BOOLEAN DEFAULT 1,
     `last_login` TIMESTAMP NULL,
     `failed_login_attempts` INT DEFAULT 0,
     `locked_until` TIMESTAMP NULL,
-    `password_changed_at` TIMESTAMP NULL,
     `email_verified_at` TIMESTAMP NULL,
-    `created_by` INT UNSIGNED,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `created_by` INT UNSIGNED,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     `deleted_at` TIMESTAMP NULL,
     FOREIGN KEY (`role_id`) REFERENCES `roles`(`id`) ON DELETE SET NULL,
-    INDEX `idx_user_code` (`user_code`),
-    INDEX `idx_email` (`email`),
-    INDEX `idx_is_active` (`is_active`),
-    INDEX `idx_level` (`level`)
+    -- ============================================================================
+    -- CREATE INDEXES FOR PERFORMANCE
+    -- ============================================================================
+
+    -- Create index on level (if not exists)
+    CREATE INDEX IF NOT EXISTS idx_users_level ON users(level);
+
+    -- Create index on is_active (if not exists)
+    CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
+
+    -- Create index on email (if not exists)
+    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+    -- Create index on user_code (if not exists)
+    CREATE INDEX IF NOT EXISTS idx_users_user_code ON users(user_code);
+    
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- User sessions (remember me)

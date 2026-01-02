@@ -1,87 +1,86 @@
 <?php
 /**
- * Users List - User Management
- * View and manage all system users
+ * User Management - List All Users
  * 
- * @version 2.0 FINAL
+ * @version 2.0
  */
 
 require_once __DIR__ . '/../_common.php';
 
-use ProConsultancy\Core\Permission;
-use ProConsultancy\Core\Database;
-use ProConsultancy\Core\Auth;
-use ProConsultancy\Core\CSRFToken;
+use ProConsultancy\Core\{Permission, Database, Auth};
 
-// Check permission
-Permission::require('users', 'view');
+// Check permission - Only admin/super_admin can access
+Permission::require('users', 'view_all');
 
-$user = Auth::user();
 $db = Database::getInstance();
 $conn = $db->getConnection();
 
-// Filters
-$roleFilter = $_GET['role'] ?? '';
-$statusFilter = $_GET['status'] ?? '';
-$searchQuery = $_GET['search'] ?? '';
+$user = Auth::user();
+$userLevel = $user['level'] ?? 'user';
+
+// Get filter parameters
+$searchTerm = filter_input(INPUT_GET, 'search', FILTER_SANITIZE_STRING);
+$filterLevel = filter_input(INPUT_GET, 'level', FILTER_SANITIZE_STRING);
+$filterStatus = filter_input(INPUT_GET, 'status', FILTER_SANITIZE_STRING);
 
 // Build query
-$where = ["1=1"];
-$params = [];
-$types = "";
-
-if ($roleFilter) {
-    $where[] = "u.role_id = ?";
-    $params[] = $roleFilter;
-    $types .= "i";
-}
-
-if ($statusFilter) {
-    if ($statusFilter === 'active') {
-        $where[] = "u.is_active = 1";
-    } else {
-        $where[] = "u.is_active = 0";
-    }
-}
-
-if ($searchQuery) {
-    $where[] = "(u.name LIKE ? OR u.email LIKE ? OR u.user_code LIKE ?)";
-    $searchTerm = "%{$searchQuery}%";
-    $params[] = $searchTerm;
-    $params[] = $searchTerm;
-    $params[] = $searchTerm;
-    $types .= "sss";
-}
-
-$whereClause = implode(" AND ", $where);
-
-$query = "
+$sql = "
     SELECT 
-        u.*,
-        r.role_name,
-        r.role_code,
-        (SELECT COUNT(*) FROM candidates WHERE assigned_to = u.user_code AND deleted_at IS NULL) as candidate_count,
-        (SELECT COUNT(*) FROM jobs WHERE assigned_to = u.user_code AND deleted_at IS NULL) as job_count
+        u.id,
+        u.user_code,
+        u.name,
+        u.email,
+        u.phone,
+        u.level,
+        u.is_active,
+        u.last_login,
+        u.created_at,
+        creator.name as created_by_name
     FROM users u
-    LEFT JOIN roles r ON r.id = u.role_id
-    WHERE {$whereClause}
-    ORDER BY u.created_at DESC
+    LEFT JOIN users creator ON u.created_by = creator.user_code
+    WHERE u.deleted_at IS NULL
 ";
 
-$stmt = $conn->prepare($query);
+$params = [];
+$types = '';
+
+// Apply search filter
+if ($searchTerm) {
+    $sql .= " AND (u.name LIKE ? OR u.email LIKE ?)";
+    $searchParam = "%{$searchTerm}%";
+    $params[] = $searchParam;
+    $params[] = $searchParam;
+    $types .= 'ss';
+}
+
+// Apply level filter
+if ($filterLevel) {
+    $sql .= " AND u.level = ?";
+    $params[] = $filterLevel;
+    $types .= 's';
+}
+
+// Apply status filter
+if ($filterStatus !== null && $filterStatus !== '') {
+    $sql .= " AND u.is_active = ?";
+    $params[] = ($filterStatus === '1') ? 1 : 0;
+    $types .= 'i';
+}
+
+$sql .= " ORDER BY u.created_at DESC";
+
+// Execute query
+$stmt = $conn->prepare($sql);
 if (!empty($params)) {
     $stmt->bind_param($types, ...$params);
 }
 $stmt->execute();
-$users = $stmt->get_result();
-
-// Get roles for filter
-$rolesQuery = "SELECT id, role_name FROM roles ORDER BY role_name";
-$roles = $conn->query($rolesQuery);
+$users = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
 // Page config
 $pageTitle = 'User Management';
 $breadcrumbs = [
+    ['title' => 'Administration', 'url' => '#'],
     ['title' => 'Users', 'url' => '']
 ];
 
@@ -90,54 +89,49 @@ require_once __DIR__ . '/../../includes/header.php';
 
 <div class="container-xxl flex-grow-1 container-p-y">
     
-    <!-- Page Header -->
+    <!-- Header -->
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h4 class="mb-1">
-                <i class="bx bx-user text-primary me-2"></i>
+                <i class="bx bx-user me-2"></i>
                 User Management
             </h4>
-            <p class="text-muted mb-0">Manage system users, roles, and permissions</p>
+            <p class="text-muted mb-0">Manage system users and access levels</p>
         </div>
-        
-        <div class="d-flex gap-2">
-            <?php if (Permission::can('users', 'manage_permissions')): ?>
-            <a href="permissions.php" class="btn btn-outline-primary">
-                <i class="bx bx-key me-1"></i> Manage Permissions
+        <div>
+            <a href="/panel/modules/users/create.php" class="btn btn-primary">
+                <i class="bx bx-plus"></i> Add New User
             </a>
-            <?php endif; ?>
-            
-            <?php if (Permission::can('users', 'create')): ?>
-            <a href="create.php" class="btn btn-primary">
-                <i class="bx bx-plus me-1"></i> Add New User
-            </a>
-            <?php endif; ?>
         </div>
     </div>
 
-    <!-- Filters Card -->
+    <?php require_once __DIR__ . '/../../includes/flash-messages.php'; ?>
+
+    <!-- Filters -->
     <div class="card mb-4">
         <div class="card-body">
-            <form method="GET" action="" class="row g-3">
-                
+            <form method="GET" class="row g-3">
                 <!-- Search -->
                 <div class="col-md-4">
                     <label class="form-label">Search</label>
-                    <input type="text" name="search" class="form-control" 
-                           placeholder="Name, email, or user code..." 
-                           value="<?= escape($searchQuery) ?>">
+                    <input type="text" 
+                           name="search" 
+                           class="form-control" 
+                           placeholder="Name or email..."
+                           value="<?= htmlspecialchars($searchTerm ?? '') ?>">
                 </div>
                 
-                <!-- Role Filter -->
+                <!-- Level Filter -->
                 <div class="col-md-3">
-                    <label class="form-label">Role</label>
-                    <select name="role" class="form-select">
+                    <label class="form-label">Role/Level</label>
+                    <select name="level" class="form-select">
                         <option value="">All Roles</option>
-                        <?php $roles->data_seek(0); while ($role = $roles->fetch_assoc()): ?>
-                            <option value="<?= $role['id'] ?>" <?= $roleFilter == $role['id'] ? 'selected' : '' ?>>
-                                <?= escape($role['role_name']) ?>
-                            </option>
-                        <?php endwhile; ?>
+                        <option value="super_admin" <?= $filterLevel === 'super_admin' ? 'selected' : '' ?>>Super Admin</option>
+                        <option value="admin" <?= $filterLevel === 'admin' ? 'selected' : '' ?>>Admin</option>
+                        <option value="manager" <?= $filterLevel === 'manager' ? 'selected' : '' ?>>Manager</option>
+                        <option value="senior_recruiter" <?= $filterLevel === 'senior_recruiter' ? 'selected' : '' ?>>Senior Recruiter</option>
+                        <option value="recruiter" <?= $filterLevel === 'recruiter' ? 'selected' : '' ?>>Recruiter</option>
+                        <option value="coordinator" <?= $filterLevel === 'coordinator' ? 'selected' : '' ?>>Coordinator</option>
                     </select>
                 </div>
                 
@@ -146,22 +140,21 @@ require_once __DIR__ . '/../../includes/header.php';
                     <label class="form-label">Status</label>
                     <select name="status" class="form-select">
                         <option value="">All Status</option>
-                        <option value="active" <?= $statusFilter === 'active' ? 'selected' : '' ?>>Active</option>
-                        <option value="inactive" <?= $statusFilter === 'inactive' ? 'selected' : '' ?>>Inactive</option>
+                        <option value="1" <?= $filterStatus === '1' ? 'selected' : '' ?>>Active</option>
+                        <option value="0" <?= $filterStatus === '0' ? 'selected' : '' ?>>Inactive</option>
                     </select>
                 </div>
                 
-                <!-- Actions -->
-                <div class="col-md-2">
-                    <label class="form-label">&nbsp;</label>
-                    <div class="d-flex gap-2">
-                        <button type="submit" class="btn btn-primary w-100">
-                            <i class="bx bx-search"></i>
-                        </button>
-                        <a href="list.php" class="btn btn-outline-secondary">
-                            <i class="bx bx-x"></i>
+                <!-- Buttons -->
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary me-2">
+                        <i class="bx bx-search"></i> Search
+                    </button>
+                    <?php if ($searchTerm || $filterLevel || $filterStatus !== null): ?>
+                        <a href="/panel/modules/users/list.php" class="btn btn-outline-secondary">
+                            <i class="bx bx-x"></i> Clear
                         </a>
-                    </div>
+                    <?php endif; ?>
                 </div>
             </form>
         </div>
@@ -169,241 +162,221 @@ require_once __DIR__ . '/../../includes/header.php';
 
     <!-- Users Table -->
     <div class="card">
-        <div class="card-body">
-            
-            <?php if ($users->num_rows === 0): ?>
-                
+        <div class="card-header">
+            <h5 class="mb-0">
+                All Users
+                <span class="badge bg-primary ms-2"><?= count($users) ?></span>
+            </h5>
+        </div>
+        <div class="card-body p-0">
+            <?php if (empty($users)): ?>
                 <div class="text-center py-5">
-                    <i class="bx bx-user display-1 text-muted"></i>
-                    <h5 class="mt-3">No Users Found</h5>
-                    <p class="text-muted">
-                        <?php if ($searchQuery || $roleFilter || $statusFilter): ?>
-                            No users match your filters. <a href="list.php">Clear filters</a>
-                        <?php else: ?>
-                            Start by adding your first user.
-                        <?php endif; ?>
-                    </p>
-                    <?php if (Permission::can('users', 'create')): ?>
-                    <a href="create.php" class="btn btn-primary mt-2">
-                        <i class="bx bx-plus me-1"></i> Add First User
+                    <i class="bx bx-user-x" style="font-size: 4rem; color: #ddd;"></i>
+                    <p class="text-muted mt-3">No users found</p>
+                    <a href="/panel/modules/users/create.php" class="btn btn-primary">
+                        <i class="bx bx-plus"></i> Add First User
                     </a>
-                    <?php endif; ?>
                 </div>
-                
             <?php else: ?>
-            
-            <div class="table-responsive">
-                <table class="table table-hover">
-                    <thead>
-                        <tr>
-                            <th>User</th>
-                            <th>Role</th>
-                            <th>Status</th>
-                            <th>Assigned Items</th>
-                            <th>Last Login</th>
-                            <th>Created</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php while ($userRow = $users->fetch_assoc()): ?>
-                        <tr>
-                            
-                            <!-- User Info -->
-                            <td>
-                                <div class="d-flex align-items-center">
-                                    <div class="avatar avatar-sm bg-label-primary me-3">
-                                        <span class="avatar-initial rounded-circle">
-                                            <?= strtoupper(substr($userRow['name'], 0, 1)) ?>
-                                        </span>
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-light">
+                            <tr>
+                                <th>User</th>
+                                <th>Email</th>
+                                <th>Phone</th>
+                                <th>Role</th>
+                                <th class="text-center">Status</th>
+                                <th>Last Login</th>
+                                <th class="text-center">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($users as $u): ?>
+                            <tr>
+                                <!-- User Info -->
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <div class="avatar avatar-sm me-2">
+                                            <span class="avatar-initial rounded-circle bg-label-primary">
+                                                <?= strtoupper(substr($u['name'], 0, 2)) ?>
+                                            </span>
+                                        </div>
+                                        <div>
+                                            <strong><?= htmlspecialchars($u['name']) ?></strong>
+                                            <br>
+                                            <small class="text-muted"><?= htmlspecialchars($u['user_code']) ?></small>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <strong><?= escape($userRow['name']) ?></strong>
-                                        <?php if ($userRow['user_code'] === Auth::userCode()): ?>
-                                            <span class="badge badge-sm bg-info ms-1">You</span>
-                                        <?php endif; ?>
-                                        <br>
-                                        <small class="text-muted"><?= escape($userRow['email']) ?></small>
-                                        <br>
-                                        <small class="text-muted"><?= escape($userRow['user_code']) ?></small>
-                                    </div>
-                                </div>
-                            </td>
-                            
-                            <!-- Role -->
-                            <td>
-                                <span class="badge bg-label-primary">
-                                    <?= escape($userRow['role_name'] ?: $userRow['level']) ?>
-                                </span>
-                            </td>
-                            
-                            <!-- Status -->
-                            <td>
-                                <?php if ($userRow['is_active']): ?>
-                                    <span class="badge bg-success">Active</span>
-                                <?php else: ?>
-                                    <span class="badge bg-secondary">Inactive</span>
-                                <?php endif; ?>
+                                </td>
                                 
-                                <?php if ($userRow['locked_until'] && strtotime($userRow['locked_until']) > time()): ?>
-                                    <br><span class="badge bg-danger mt-1">Locked</span>
-                                <?php endif; ?>
-                            </td>
-                            
-                            <!-- Assigned Items -->
-                            <td>
-                                <div class="small">
-                                    <div><i class="bx bx-briefcase me-1"></i><?= $userRow['job_count'] ?> Jobs</div>
-                                    <div><i class="bx bx-user me-1"></i><?= $userRow['candidate_count'] ?> Candidates</div>
-                                </div>
-                            </td>
-                            
-                            <!-- Last Login -->
-                            <td>
-                                <?php if ($userRow['last_login']): ?>
-                                    <small><?= timeAgo($userRow['last_login']) ?></small>
-                                <?php else: ?>
-                                    <small class="text-muted">Never</small>
-                                <?php endif; ?>
-                            </td>
-                            
-                            <!-- Created -->
-                            <td>
-                                <small><?= formatDate($userRow['created_at']) ?></small>
-                            </td>
-                            
-                            <!-- Actions -->
-                            <td>
-                                <div class="dropdown">
-                                    <button class="btn btn-sm btn-icon" data-bs-toggle="dropdown">
-                                        <i class="bx bx-dots-vertical-rounded"></i>
-                                    </button>
-                                    <ul class="dropdown-menu dropdown-menu-end">
-                                        <?php if (Permission::can('users', 'edit')): ?>
-                                        <li>
-                                            <a class="dropdown-item" href="edit.php?user_code=<?= $userRow['user_code'] ?>">
-                                                <i class="bx bx-edit me-2"></i> Edit User
-                                            </a>
-                                        </li>
+                                <!-- Email -->
+                                <td><?= htmlspecialchars($u['email']) ?></td>
+                                
+                                <!-- Phone -->
+                                <td><?= htmlspecialchars($u['phone'] ?? '-') ?></td>
+                                
+                                <!-- Role -->
+                                <td>
+                                    <?php
+                                    $roleBadges = [
+                                        'super_admin' => ['class' => 'danger', 'label' => 'Super Admin'],
+                                        'admin' => ['class' => 'warning', 'label' => 'Admin'],
+                                        'manager' => ['class' => 'info', 'label' => 'Manager'],
+                                        'senior_recruiter' => ['class' => 'primary', 'label' => 'Senior Recruiter'],
+                                        'recruiter' => ['class' => 'success', 'label' => 'Recruiter'],
+                                        'coordinator' => ['class' => 'secondary', 'label' => 'Coordinator']
+                                    ];
+                                    $badge = $roleBadges[$u['level']] ?? ['class' => 'secondary', 'label' => ucfirst($u['level'])];
+                                    ?>
+                                    <span class="badge bg-<?= $badge['class'] ?>">
+                                        <?= $badge['label'] ?>
+                                    </span>
+                                </td>
+                                
+                                <!-- Status -->
+                                <td class="text-center">
+                                    <?php if ($u['is_active']): ?>
+                                        <span class="badge bg-success">Active</span>
+                                    <?php else: ?>
+                                        <span class="badge bg-secondary">Inactive</span>
+                                    <?php endif; ?>
+                                </td>
+                                
+                                <!-- Last Login -->
+                                <td>
+                                    <?php if ($u['last_login']): ?>
+                                        <?= date('M d, Y H:i', strtotime($u['last_login'])) ?>
+                                    <?php else: ?>
+                                        <span class="text-muted">Never</span>
+                                    <?php endif; ?>
+                                </td>
+                                
+                                <!-- Actions -->
+                                <td class="text-center">
+                                    <div class="btn-group btn-group-sm">
+                                        <!-- Edit -->
+                                        <a href="/panel/modules/users/edit.php?id=<?= $u['id'] ?>" 
+                                           class="btn btn-outline-primary"
+                                           title="Edit User">
+                                            <i class="bx bx-edit"></i>
+                                        </a>
+                                        
+                                        <!-- Toggle Status -->
+                                        <?php if (Permission::can('users', 'toggle_status')): ?>
+                                            <button type="button" 
+                                                    class="btn btn-outline-<?= $u['is_active'] ? 'warning' : 'success' ?>"
+                                                    onclick="toggleUserStatus(<?= $u['id'] ?>, <?= $u['is_active'] ? 0 : 1 ?>)"
+                                                    title="<?= $u['is_active'] ? 'Deactivate' : 'Activate' ?>">
+                                                <i class="bx bx-<?= $u['is_active'] ? 'x-circle' : 'check-circle' ?>"></i>
+                                            </button>
                                         <?php endif; ?>
                                         
-                                        <?php if (Permission::can('users', 'manage_permissions')): ?>
-                                        <li>
-                                            <a class="dropdown-item" href="permissions.php?user_code=<?= $userRow['user_code'] ?>">
-                                                <i class="bx bx-key me-2"></i> Manage Permissions
-                                            </a>
-                                        </li>
+                                        <!-- Reset Password -->
+                                        <?php if (Permission::can('users', 'reset_password')): ?>
+                                            <button type="button" 
+                                                    class="btn btn-outline-info"
+                                                    onclick="resetUserPassword(<?= $u['id'] ?>, '<?= htmlspecialchars($u['name']) ?>')"
+                                                    title="Reset Password">
+                                                <i class="bx bx-key"></i>
+                                            </button>
                                         <?php endif; ?>
-                                        
-                                        <?php if (Permission::can('users', 'edit') && $userRow['user_code'] !== Auth::userCode()): ?>
-                                        <li><hr class="dropdown-divider"></li>
-                                        
-                                        <?php if ($userRow['is_active']): ?>
-                                        <li>
-                                            <a class="dropdown-item text-warning" href="#" 
-                                               onclick="toggleUserStatus('<?= $userRow['user_code'] ?>', 0); return false;">
-                                                <i class="bx bx-block me-2"></i> Deactivate
-                                            </a>
-                                        </li>
-                                        <?php else: ?>
-                                        <li>
-                                            <a class="dropdown-item text-success" href="#" 
-                                               onclick="toggleUserStatus('<?= $userRow['user_code'] ?>', 1); return false;">
-                                                <i class="bx bx-check-circle me-2"></i> Activate
-                                            </a>
-                                        </li>
-                                        <?php endif; ?>
-                                        
-                                        <li>
-                                            <a class="dropdown-item text-info" href="#" 
-                                               onclick="resetPassword('<?= $userRow['user_code'] ?>'); return false;">
-                                                <i class="bx bx-reset me-2"></i> Reset Password
-                                            </a>
-                                        </li>
-                                        <?php endif; ?>
-                                        
-                                        <?php if (Permission::can('users', 'delete') && $userRow['user_code'] !== Auth::userCode()): ?>
-                                        <li><hr class="dropdown-divider"></li>
-                                        <li>
-                                            <a class="dropdown-item text-danger" href="#" 
-                                               onclick="deleteUser('<?= $userRow['user_code'] ?>'); return false;">
-                                                <i class="bx bx-trash me-2"></i> Delete
-                                            </a>
-                                        </li>
-                                        <?php endif; ?>
-                                    </ul>
-                                </div>
-                            </td>
-                        </tr>
-                        <?php endwhile; ?>
-                    </tbody>
-                </table>
-            </div>
-            
+                                    </div>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
             <?php endif; ?>
         </div>
     </div>
 </div>
 
+<!-- JavaScript -->
 <script>
-function toggleUserStatus(userCode, status) {
-    const action = status ? 'activate' : 'deactivate';
+/**
+ * Toggle user active/inactive status
+ */
+function toggleUserStatus(userId, newStatus) {
+    const action = newStatus === 1 ? 'activate' : 'deactivate';
+    
     if (!confirm(`Are you sure you want to ${action} this user?`)) {
         return;
     }
     
-    fetch('handlers/toggle_status.php', {
+    // Show loading
+    const btn = event.target.closest('button');
+    const originalHTML = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bx bx-loader bx-spin"></i>';
+    
+    // Send request
+    fetch('/panel/modules/users/handlers/toggle_status.php', {
         method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: `user_code=${userCode}&is_active=${status}&csrf_token=<?= CSRFToken::generate() ?>`
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `user_id=${userId}&status=${newStatus}`
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            location.reload();
+            // Reload page to show updated status
+            window.location.reload();
         } else {
-            alert('Error: ' + data.message);
+            alert('Error: ' + (data.message || 'Failed to update user status'));
+            btn.disabled = false;
+            btn.innerHTML = originalHTML;
         }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('An error occurred. Please try again.');
+        btn.disabled = false;
+        btn.innerHTML = originalHTML;
     });
 }
 
-function resetPassword(userCode) {
-    if (!confirm('Reset password to default? User will need to change it on next login.')) {
+/**
+ * Reset user password
+ */
+function resetUserPassword(userId, userName) {
+    if (!confirm(`Reset password for ${userName}?\n\nA new temporary password will be generated and displayed.`)) {
         return;
     }
     
-    fetch('handlers/reset_password.php', {
+    // Show loading
+    const btn = event.target.closest('button');
+    const originalHTML = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bx bx-loader bx-spin"></i>';
+    
+    // Send request
+    fetch('/panel/modules/users/handlers/reset_password.php', {
         method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: `user_code=${userCode}&csrf_token=<?= CSRFToken::generate() ?>`
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `user_id=${userId}`
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            alert('Password reset successfully! New password: ' + data.new_password);
+            alert(`Password reset successful!\n\nNew temporary password: ${data.new_password}\n\nPlease save this and share it with the user.`);
+            btn.disabled = false;
+            btn.innerHTML = originalHTML;
         } else {
-            alert('Error: ' + data.message);
+            alert('Error: ' + (data.message || 'Failed to reset password'));
+            btn.disabled = false;
+            btn.innerHTML = originalHTML;
         }
-    });
-}
-
-function deleteUser(userCode) {
-    if (!confirm('Are you sure you want to delete this user? This action cannot be undone.')) {
-        return;
-    }
-    
-    fetch('handlers/delete.php', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: `user_code=${userCode}&csrf_token=<?= CSRFToken::generate() ?>`
     })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            location.reload();
-        } else {
-            alert('Error: ' + data.message);
-        }
+    .catch(error => {
+        console.error('Error:', error);
+        alert('An error occurred. Please try again.');
+        btn.disabled = false;
+        btn.innerHTML = originalHTML;
     });
 }
 </script>

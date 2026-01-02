@@ -37,9 +37,7 @@ try {
         'name' => 'required|max:100',
         'email' => 'required|email|max:255',
         'level' => 'required|in:super_admin,admin,manager,senior_recruiter,recruiter,coordinator',
-        'phone' => 'max:20',
-        'department' => 'max:100',
-        'position' => 'max:100'
+        'phone' => 'max:20'
     ];
     
     // Add password validation for new users

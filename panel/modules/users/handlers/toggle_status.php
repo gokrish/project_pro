@@ -1,42 +1,103 @@
 <?php
+/**
+ * User Management - Toggle User Status Handler
+ * Activate/Deactivate user
+ * 
+ * @version 2.0
+ */
+
 require_once __DIR__ . '/../../_common.php';
-use ProConsultancy\Core\Permission;
-use ProConsultancy\Core\Database;
-use ProConsultancy\Core\CSRFToken;
-use ProConsultancy\Core\ApiResponse;
-use ProConsultancy\Core\Logger;
 
-Permission::require('users', 'edit');
+use ProConsultancy\Core\{Permission, Database, Auth, Logger};
 
-if (!CSRFToken::verify($_POST['csrf_token'] ?? '')) {
-    ApiResponse::error('Invalid security token', 403);
-}
+// Check permission
+Permission::require('users', 'toggle_status');
+
+// Set JSON header
+header('Content-Type: application/json');
 
 $db = Database::getInstance();
 $conn = $db->getConnection();
 
-$userCode = $_POST['user_code'] ?? null;
-$isActive = (int)($_POST['is_active'] ?? 0);
+// Get parameters
+$userId = filter_input(INPUT_POST, 'user_id', FILTER_VALIDATE_INT);
+$newStatus = filter_input(INPUT_POST, 'status', FILTER_VALIDATE_INT);
 
-if (!$userCode) {
-    ApiResponse::error('User code is required', 400);
-}
-
-if ($userCode === Auth::userCode()) {
-    ApiResponse::error('You cannot deactivate yourself', 400);
+// Validation
+if (!$userId || ($newStatus !== 0 && $newStatus !== 1)) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Invalid parameters'
+    ]);
+    exit;
 }
 
 try {
-    $stmt = $conn->prepare("UPDATE users SET is_active = ? WHERE user_code = ?");
-    $stmt->bind_param("is", $isActive, $userCode);
+    // Check if user exists
+    $stmt = $conn->prepare("
+        SELECT user_code, name, email, is_active 
+        FROM users 
+        WHERE id = ? AND deleted_at IS NULL
+    ");
+    $stmt->bind_param("i", $userId);
+    $stmt->execute();
+    $user = $stmt->get_result()->fetch_assoc();
+    
+    if (!$user) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'User not found'
+        ]);
+        exit;
+    }
+    
+    // Prevent deactivating yourself
+    $currentUser = Auth::user();
+    if ($user['user_code'] === $currentUser['user_code'] && $newStatus === 0) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'You cannot deactivate your own account'
+        ]);
+        exit;
+    }
+    
+    // Update status
+    $stmt = $conn->prepare("
+        UPDATE users 
+        SET is_active = ?,
+            updated_at = NOW()
+        WHERE id = ?
+    ");
+    $stmt->bind_param("ii", $newStatus, $userId);
     
     if ($stmt->execute()) {
-        $action = $isActive ? 'activated' : 'deactivated';
-        Logger::getInstance()->logActivity('update', 'users', $userCode, "User {$action}");
-        ApiResponse::success(['user_code' => $userCode, 'is_active' => $isActive], "User {$action} successfully");
+        // Log activity
+        $action = $newStatus === 1 ? 'activated' : 'deactivated';
+        Logger::getInstance()->info("User {$action}", [
+            'user_id' => $userId,
+            'user_code' => $user['user_code'],
+            'name' => $user['name'],
+            'new_status' => $newStatus,
+            'changed_by' => Auth::userCode()
+        ]);
+        
+        echo json_encode([
+            'success' => true,
+            'message' => 'User status updated successfully',
+            'new_status' => $newStatus
+        ]);
     } else {
-        ApiResponse::error('Failed to update user status', 500);
+        throw new Exception('Database update failed');
     }
+    
 } catch (Exception $e) {
-    ApiResponse::error($e->getMessage(), 500);
+    Logger::getInstance()->error('Toggle user status failed', [
+        'error' => $e->getMessage(),
+        'user_id' => $userId
+    ]);
+    
+    echo json_encode([
+        'success' => false,
+        'message' => 'Failed to update user status'
+    ]);
 }

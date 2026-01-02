@@ -371,7 +371,61 @@ $conn = $db->getConnection();
             </ul>
         </li>
         <?php endif; ?>
+        <!-- ============================================================================ -->
+        <!-- SECTION: USER MANAGEMENT & SETTINGS -->
+        <!-- ============================================================================ -->
 
+        <!-- ADMINISTRATION SECTION (for Admins Only) -->
+        <?php if (in_array($userLevel, ['super_admin', 'admin'])): ?>
+        <li class="menu-header small text-uppercase">
+            <span class="menu-header-text">Administration</span>
+        </li>
+
+        <!-- User Management -->
+        <?php if (Permission::can('users', 'view_all')): ?>
+        <li class="menu-item <?= $currentModule === 'users' ? 'open' : '' ?>">
+            <a href="javascript:void(0);" class="menu-link menu-toggle">
+                <i class="menu-icon tf-icons bx bx-user"></i>
+                <div data-i18n="Users">User Management</div>
+            </a>
+            <ul class="menu-sub">
+                <li class="menu-item <?= basename($_SERVER['PHP_SELF']) === 'list.php' ? 'active' : '' ?>">
+                    <a href="/panel/modules/users/list.php" class="menu-link">
+                        <div data-i18n="All Users">All Users</div>
+                    </a>
+                </li>
+                <?php if (Permission::can('users', 'create')): ?>
+                <li class="menu-item <?= basename($_SERVER['PHP_SELF']) === 'create.php' ? 'active' : '' ?>">
+                    <a href="/panel/modules/users/create.php" class="menu-link">
+                        <div data-i18n="Add User">Add New User</div>
+                    </a>
+                </li>
+                <?php endif; ?>
+            </ul>
+        </li>
+        <?php endif; ?>
+        <?php endif; ?>
+
+        <!-- MY ACCOUNT SECTION (for All Users) -->
+        <li class="menu-header small text-uppercase">
+            <span class="menu-header-text">My Account</span>
+        </li>
+
+        <!-- My Profile -->
+        <li class="menu-item <?= basename($_SERVER['PHP_SELF']) === 'profile.php' ? 'active' : '' ?>">
+            <a href="/panel/modules/users/profile.php" class="menu-link">
+                <i class="menu-icon tf-icons bx bx-user-circle"></i>
+                <div data-i18n="My Profile">My Profile</div>
+            </a>
+        </li>
+
+        <!-- Settings (Password Change) -->
+        <li class="menu-item <?= $currentModule === 'settings' ? 'active' : '' ?>">
+            <a href="/panel/modules/settings/general.php" class="menu-link">
+                <i class="menu-icon tf-icons bx bx-cog"></i>
+                <div data-i18n="Settings">Settings</div>
+            </a>
+        </li>
         <!-- SECTION: ADMINISTRATION -->
         <?php if (canAccess('users', 'view') || $userRole === 'admin' || $userRole === 'super_admin'): ?>
         <li class="menu-header small text-uppercase">

@@ -11,5 +11,5 @@ use ProConsultancy\Core\Permission;
 // Admin only
 Permission::require('settings', 'view');
 
-header('Location: /panel/modules/settings/company.php');
+header('Location: /panel/modules/settings/general.php');
 exit;
