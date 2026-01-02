@@ -1,7 +1,6 @@
 <?php
 /**
  * CV Inbox - Application Management
- * Manual entry for email/LinkedIn applications
  * 
  * @version 5.0
  */
@@ -64,7 +63,7 @@ switch ($filters['tab']) {
 
 // Search filter
 if (!empty($filters['search'])) {
-    $whereConditions[] = "(cv.candidate_name LIKE ? OR cv.email LIKE ? OR cv.phone LIKE ?)";
+    $whereConditions[] = "(cv.applicant_name LIKE ? OR cv.email LIKE ? OR cv.phone LIKE ?)";
     $searchTerm = '%' . $filters['search'] . '%';
     $params = array_merge($params, [$searchTerm, $searchTerm, $searchTerm]);
     $types .= 'sss';
@@ -148,7 +147,7 @@ $sql = "
         cv.*,
         j.job_title,
         u.name as assigned_to_name,
-        c.candidate_name as converted_candidate_name
+        c.applicant_name as converted_candidate_name
     FROM cv_inbox cv
     LEFT JOIN jobs j ON cv.job_code = j.job_code
     LEFT JOIN users u ON cv.assigned_to = u.user_code
@@ -474,13 +473,13 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <div class="d-flex align-items-center">
                                     <div class="avatar avatar-sm me-2">
                                         <div class="avatar-initial rounded-circle bg-label-primary">
-                                            <?= strtoupper(substr($cv['candidate_name'], 0, 1)) ?>
+                                            <?= strtoupper(substr($cv['applicant_name'], 0, 1)) ?>
                                         </div>
                                     </div>
                                     <div>
                                         <a href="/panel/modules/cv-inbox/view.php?id=<?= $cv['id'] ?>" 
                                            class="fw-semibold text-decoration-none">
-                                            <?= htmlspecialchars($cv['candidate_name']) ?>
+                                            <?= htmlspecialchars($cv['applicant_name']) ?>
                                         </a>
                                         <?php if ($cv['resume_path']): ?>
                                         <br><small class="text-success">

@@ -1,117 +1,165 @@
 <?php
 /**
  * Update CV Status Handler
+ * Refactored to include quality_score and review_notes
  * 
- * @version 5.0
+ * @version 2.0 - Refactored
  */
 
 require_once __DIR__ . '/../../_common.php';
 
 use ProConsultancy\Core\Permission;
 use ProConsultancy\Core\Database;
-use ProConsultancy\Core\ApiResponse;
 use ProConsultancy\Core\CSRFToken;
-use ProConsultancy\Core\Auth;
 use ProConsultancy\Core\Logger;
-
-header('Content-Type: application/json');
+use ProConsultancy\Core\Auth;
+use ProConsultancy\Core\ApiResponse;
 
 // Check permission
 if (!Permission::can('cv_inbox', 'edit')) {
-    ApiResponse::forbidden();
+    ApiResponse::forbidden('You do not have permission to update CV status');
 }
 
-// Verify CSRF
-if (!CSRFToken::verifyRequest()) {
-    ApiResponse::error('Invalid CSRF token', 403);
+// Verify CSRF token
+if (!CSRFToken::verify($_POST['csrf_token'] ?? '')) {
+    ApiResponse::error('Invalid security token');
 }
+
+// Validate input
+if (empty($_POST['cv_id'])) {
+    ApiResponse::error('CV ID is required');
+}
+
+if (empty($_POST['status'])) {
+    ApiResponse::error('Status is required');
+}
+
+$cvId = (int)$_POST['cv_id'];
+$newStatus = $_POST['status'];
+$qualityScore = isset($_POST['quality_score']) ? (int)$_POST['quality_score'] : null;
+$reviewNotes = trim($_POST['review_notes'] ?? '');
+$rejectionReason = trim($_POST['rejection_reason'] ?? '');
+$user = Auth::user();
+
+// Validate status
+$validStatuses = ['new', 'screening', 'shortlisted', 'converted', 'rejected', 'spam'];
+if (!in_array($newStatus, $validStatuses)) {
+    ApiResponse::error('Invalid status value');
+}
+
+// Validate quality score (1-5)
+if ($qualityScore !== null && ($qualityScore < 1 || $qualityScore > 5)) {
+    ApiResponse::error('Quality score must be between 1 and 5');
+}
+
+$db = Database::getInstance();
+$conn = $db->getConnection();
 
 try {
-    $cvId = (int)input('cv_id');
-    $status = input('status');
+    $db->beginTransaction();
     
-    $validStatuses = ['new', 'reviewed', 'converted', 'rejected', 'spam'];
-    
-    if (!$cvId || !in_array($status, $validStatuses)) {
-        ApiResponse::validation(['status' => 'Invalid status']);
-    }
-    
-    $db = Database::getInstance();
-    $conn = $db->getConnection();
-
-    // Get current status
-    $stmt = $conn->prepare("SELECT status FROM cv_inbox WHERE id = ?");
+    // Get current CV data
+    $stmt = $conn->prepare("
+        SELECT cv_code, applicant_name, status, reviewed_by, reviewed_at
+        FROM cv_inbox 
+        WHERE id = ? AND deleted_at IS NULL
+    ");
     $stmt->bind_param("i", $cvId);
     $stmt->execute();
     $result = $stmt->get_result();
+    $cv = $result->fetch_assoc();
     
-    if ($result->num_rows === 0) {
-        ApiResponse::error('CV not found', 404);
+    if (!$cv) {
+        ApiResponse::notFound('CV not found');
     }
     
-    $currentStatus = $result->fetch_assoc()['status'];
-
-    // Prevent invalid transitions
-    $invalidTransitions = [
-        'converted' => ['new', 'reviewed'], // Can't unconvert
-        'spam' => ['converted'], // Spam can't be converted
-    ];
-
-    if (isset($invalidTransitions[$currentStatus]) && 
-        in_array($status, $invalidTransitions[$currentStatus])) {
-        ApiResponse::error(
-            "Cannot change status from {$currentStatus} to {$status}", 
-            400
-        );
-    }
-
-    // Special handling for rejection
-    if ($status === 'rejected') {
-        $rejectionReason = input('reason', '');
-        
-        if (empty($rejectionReason)) {
-            ApiResponse::validation([
-                'reason' => 'Rejection reason is required'
-            ]);
-        }
-        
-        // Update with reason
-        $stmt = $conn->prepare("
-            UPDATE cv_inbox 
-            SET status = ?, 
-                rejection_reason = ?,
-                rejected_by = ?,
-                rejected_at = NOW()
-            WHERE id = ?
-        ");
-        $stmt->bind_param("sssi", $status, $rejectionReason, Auth::userCode(), $cvId);
-        $stmt->execute();
-        
-        // Optional: Send rejection email
-        // $mailer = new Mailer();
-        // $mailer->sendRejectionEmail(...);
-        
-    } else {
-        // Normal status update
-        $stmt = $conn->prepare("UPDATE cv_inbox SET status = ? WHERE id = ?");
-        $stmt->bind_param("si", $status, $cvId);
-        $stmt->execute();
+    $oldStatus = $cv['status'];
+    
+    // Prepare update fields
+    $updateFields = ['status = ?'];
+    $updateParams = [$newStatus];
+    $updateTypes = 's';
+    
+    // If moving from 'new' to any other status, mark as reviewed
+    if ($oldStatus === 'new' && $newStatus !== 'new') {
+        $updateFields[] = 'reviewed_by = ?';
+        $updateFields[] = 'reviewed_at = NOW()';
+        $updateParams[] = $user['user_code'];
+        $updateTypes .= 's';
     }
     
-    // Log activity
+    // Add quality score if provided
+    if ($qualityScore !== null) {
+        $updateFields[] = 'quality_score = ?';
+        $updateParams[] = $qualityScore;
+        $updateTypes .= 'i';
+    }
+    
+    // Add review notes if provided
+    if (!empty($reviewNotes)) {
+        $updateFields[] = 'review_notes = ?';
+        $updateParams[] = $reviewNotes;
+        $updateTypes .= 's';
+    }
+    
+    // Add rejection reason if status is rejected
+    if ($newStatus === 'rejected' && !empty($rejectionReason)) {
+        $updateFields[] = 'rejection_reason = ?';
+        $updateParams[] = $rejectionReason;
+        $updateTypes .= 's';
+    }
+    
+    // Update CV
+    $sql = "UPDATE cv_inbox SET " . implode(', ', $updateFields) . ", updated_at = NOW() WHERE id = ?";
+    $updateParams[] = $cvId;
+    $updateTypes .= 'i';
+    
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param($updateTypes, ...$updateParams);
+    
+    if (!$stmt->execute()) {
+        throw new Exception('Failed to update CV status');
+    }
+    
+    // Log status change
     Logger::getInstance()->logActivity(
         'update',
         'cv_inbox',
-        $cvId,
-        "Changed CV status to: {$status}"
+        $cv['cv_code'],
+        "Status changed: {$oldStatus} → {$newStatus}",
+        [
+            'cv_id' => $cvId,
+            'applicant_name' => $cv['applicant_name'],
+            'old_status' => $oldStatus,
+            'new_status' => $newStatus,
+            'quality_score' => $qualityScore,
+            'has_review_notes' => !empty($reviewNotes),
+            'updated_by' => $user['user_code']
+        ]
     );
     
-    ApiResponse::success(null, 'Status updated successfully');
+    $db->commit();
+    
+    ApiResponse::success([
+        'cv_id' => $cvId,
+        'cv_code' => $cv['cv_code'],
+        'old_status' => $oldStatus,
+        'new_status' => $newStatus,
+        'quality_score' => $qualityScore,
+        'reviewed_by' => $user['user_code'],
+        'updated_at' => date('Y-m-d H:i:s')
+    ], 'CV status updated successfully');
     
 } catch (Exception $e) {
-    Logger::getInstance()->error('Update status failed', [
-        'error' => $e->getMessage()
+    $db->rollback();
+    
+    Logger::getInstance()->error('Failed to update CV status', [
+        'cv_id' => $cvId,
+        'error' => $e->getMessage(),
+        'trace' => $e->getTraceAsString()
     ]);
     
-    ApiResponse::error('Failed to update status', 500);
+    ApiResponse::serverError('Failed to update status', [
+        'error' => $e->getMessage()
+    ]);
 }

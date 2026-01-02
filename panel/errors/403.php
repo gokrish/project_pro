@@ -3,7 +3,7 @@
  * 403 Forbidden Error Page
  * Access Denied - User doesn't have permission
  * 
- * @version 5.0
+ * @version 2.0
  */
  // Try to load core classes
     use ProConsultancy\Core\Auth;

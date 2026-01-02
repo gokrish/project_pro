@@ -1,7 +1,7 @@
 // modules/candidates/handlers/update_lead_status.php
 <?php
 require_once __DIR__ . '/../../_common.php';
-
+use ProConsultancy\Core\Database;
 // Validate permissions
 if (!in_array($user['level'], ['admin', 'recruiter'])) {
     http_response_code(403);
@@ -35,7 +35,7 @@ try {
     $stmt->execute();
     
     // Log the change
-    $stmt = $conn->prepare("INSERT INTO activity_log (user_code, action, module, record_id, details) VALUES (?, 'lead_status_change', 'candidates', ?, ?)");
+    $stmt = $conn->prepare("INSERT INTO candidate_activity_log (user_code, action, module, record_id, details) VALUES (?, 'lead_status_change', 'candidates', ?, ?)");
     $details = json_encode(['from' => $_POST['old_status'] ?? '', 'to' => $lead_type, 'notes' => $notes]);
     $stmt->bind_param("sss", $user['user_code'], $candidate_code, $details);
     $stmt->execute();

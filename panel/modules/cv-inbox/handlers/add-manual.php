@@ -1,33 +1,30 @@
 <?php
 /**
  * Add Manual CV Entry Handler
- * For applications received via email/LinkedIn
  * 
- * @version 5.0
+ * @version 2.0
  */
 
 require_once __DIR__ . '/../../_common.php';
 
 use ProConsultancy\Core\Permission;
 use ProConsultancy\Core\Database;
-use ProConsultancy\Core\FileUpload;
 use ProConsultancy\Core\Validator;
 use ProConsultancy\Core\CSRFToken;
-use ProConsultancy\Core\ApiResponse;
 use ProConsultancy\Core\Logger;
-
-header('Content-Type: application/json');
+use ProConsultancy\Core\Auth;
 
 // Check permission
-if (!Permission::can('cv_inbox', 'create')) {
-    echo ApiResponse::forbidden();
-    exit;
+Permission::require('cv_inbox', 'create');
+
+// Check request
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    redirectBack('Invalid request method');
 }
 
 // Verify CSRF
 if (!CSRFToken::verifyRequest()) {
-    echo ApiResponse::error('Invalid CSRF token', 403);
-    exit;
+    redirectBack('Invalid request token');
 }
 
 try {
@@ -37,133 +34,177 @@ try {
     
     // Validate input
     $validator = new Validator($_POST);
+    
     if (!$validator->validate([
-        'candidate_name' => 'required|min:2',
-        'email' => 'required|email',
-        'source' => 'required'
+        'applicant_name' => 'required|min:2|max:255',
+        'applicant_email' => 'required|email|max:255',
     ])) {
-        echo ApiResponse::validationError($validator->errors());
-        exit;
+        $errors = $validator->errors();
+        $firstError = reset($errors)[0] ?? 'Validation failed';
+        redirectBack($firstError);
     }
     
     $data = $validator->validated();
     
-    // Check if email already exists in inbox (prevent duplicates)
-    $stmt = $conn->prepare("SELECT id FROM cv_inbox WHERE email = ? AND status != 'rejected'");
-    $stmt->bind_param("s", $data['email']);
+    // Generate CV code
+    $cvCode = 'CV' . date('Ymd') . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
+    
+    // Check if code exists (regenerate if needed)
+    $stmt = $conn->prepare("SELECT cv_code FROM cv_inbox WHERE cv_code = ?");
+    $stmt->bind_param("s", $cvCode);
     $stmt->execute();
     if ($stmt->get_result()->num_rows > 0) {
-        echo ApiResponse::error('This email already exists in the inbox', 400);
-        exit;
+        $cvCode = 'CV' . date('YmdHis') . rand(100, 999);
     }
     
-    // Handle resume upload
-    $resumePath = null;
-    $resumeFilename = null;
-
-    if (!isset($_FILES['resume']) || $_FILES['resume']['error'] !== UPLOAD_ERR_OK) {
-        echo ApiResponse::error('Resume file is required', 400);
-        exit;
-    }
-
-    // Upload directory
-    $uploadDir = ROOT_PATH . '/uploads/cv-inbox/';
-    if (!is_dir($uploadDir)) {
-        mkdir($uploadDir, 0755, true);
-    }
-
-    $fileUpload = new FileUpload();
-    $result = $fileUpload->upload('resume', $uploadDir, [
-        'allowed_types' => ['pdf', 'doc', 'docx'],
-        'max_size' => 5 * 1024 * 1024,
-        'generate_unique_name' => true
-    ]);
-
-    if (!$result['success']) {
-        echo ApiResponse::error($result['error'], 400);
-        exit;
-    }
-
-    // Store relative path (without ROOT_PATH)
-    $resumePath = '/uploads/cv-inbox/' . $result['filename'];
-    $resumeFilename = $result['filename'];
+    // Get optional fields
+    $applicantLinkedin = input('applicant_linkedin', '');
+    $coverLetterPath = input('cover_letter_path', '');
     
-    // Optional fields
-    $phone = input('phone', '');
+    // Job linking (IMPORTANT!)
     $jobCode = input('job_code', '');
-    $notes = input('notes', '');
+    $jobId = null;
+    $jobRefno = null;
     
-    // Insert into cv_inbox
-    $sql = "
-        INSERT INTO cv_inbox (
-            candidate_name, email, phone,
-            job_code, source, resume_path,
-            status, assigned_to,
-            received_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 'new', ?, NOW())
-    ";
-    
-    $stmt = $conn->prepare($sql);
-    $assignedTo = $user['user_code']; // Assign to current user by default
-    
-    $stmt->bind_param(
-        "sssssss",
-        $data['candidate_name'],
-        $data['email'],
-        $phone,
-        $jobCode,
-        $data['source'],
-        $resumePath,
-        $assignedTo
-    );
-    
-    if (!$stmt->execute()) {
-        throw new Exception('Failed to add CV to inbox: ' . $stmt->error);
-    }
-    
-    $cvId = $conn->insert_id;
-    
-    // Add initial note if provided
-    if (!empty($notes)) {
-        $stmt = $conn->prepare("
-            INSERT INTO cv_notes (cv_id, note, created_by, created_at)
-            VALUES (?, ?, ?, NOW())
-        ");
-        $stmt->bind_param("iss", $cvId, $notes, $user['user_code']);
+    if (!empty($jobCode)) {
+        // Get job_id and job_refno from jobs table
+        $stmt = $conn->prepare("SELECT id, job_refno FROM jobs WHERE job_code = ? AND deleted_at IS NULL");
+        $stmt->bind_param("s", $jobCode);
         $stmt->execute();
+        $jobResult = $stmt->get_result();
+        if ($jobData = $jobResult->fetch_assoc()) {
+            $jobId = $jobData['id'];
+            $jobRefno = $jobData['job_refno'];
+        }
     }
     
-    // Log activity
-    Logger::getInstance()->logActivity(
-        'create',
-        'cv_inbox',
-        $cvId,
-        "Added CV to inbox: {$data['candidate_name']}",
-        [
-            'email' => $data['email'],
-            'source' => $data['source'],
-            'job_code' => $jobCode
-        ]
-    );
+    // Source
+    $source = input('source', 'Website_Career_Page');
+    $validSources = ['Website_Career_Page', 'Email', 'LinkedIn', 'Referral', 'Direct', 'Other'];
+    if (!in_array($source, $validSources)) {
+        $source = 'Website_Career_Page';
+    }
     
-    // Send notification to assigned recruiter (if different from current user)
-    if ($assignedTo !== $user['user_code']) {
-        Notification::send(
+    // Status (default: new)
+    $status = 'new';
+    
+    // Assignment
+    $assignedTo = input('assigned_to', '');
+    $assignedAt = !empty($assignedTo) ? date('Y-m-d H:i:s') : null;
+    
+    // CV file path (required)
+    $cvPath = input('cv_path', '');
+    if (empty($cvPath)) {
+        // Handle file upload if provided
+        if (!empty($_FILES['cv_file']['name'])) {
+            // File upload logic here
+            // For now, we'll require cv_path to be provided
+            redirectBack('CV file is required');
+        } else {
+            redirectBack('CV file path is required');
+        }
+    }
+    
+    // Initial notes
+    $initialNotes = input('notes', '');
+    
+    // Begin transaction
+    $conn->begin_transaction();
+    
+    try {
+        // Insert CV entry
+        $sql = "
+            INSERT INTO cv_inbox (
+                cv_code,
+                job_id,
+                job_code,
+                job_refno,
+                applicant_name,
+                applicant_email,
+                cv_path,
+                cover_letter_path,
+                source,
+                status,
+                assigned_to,
+                assigned_at,
+                submitted_at,
+                updated_at
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW()
+            )
+        ";
+        
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param(
+            "sissssssssssss",
+            $cvCode,
+            $jobId,
+            $jobCode,
+            $jobRefno,
+            $data['applicant_name'],
+            $data['applicant_email'],
+            $data['applicant_phone'],
+            $applicantLinkedin,
+            $cvPath,
+            $coverLetterPath,
+            $source,
+            $status,
             $assignedTo,
-            'cv_inbox_new',
-            'New CV Application',
-            "New application received from {$data['candidate_name']}",
-            'cv_inbox',
-            $cvId
+            $assignedAt
         );
+        
+        if (!$stmt->execute()) {
+            throw new Exception('Failed to create CV entry: ' . $stmt->error);
+        }
+        
+        $cvId = $conn->insert_id;
+        
+        // Add initial note if provided
+        if (!empty($initialNotes)) {
+            $stmt = $conn->prepare("
+                INSERT INTO cv_inbox_notes (cv_id, note_type, note, created_by, created_at)
+                VALUES (?, 'general', ?, ?, NOW())
+            ");
+            $stmt->bind_param("iss", $cvId, $initialNotes, $user['user_code']);
+            $stmt->execute();
+        }
+        
+        // Log activity
+        Logger::getInstance()->logActivity(
+            'create',
+            'cv_inbox',
+            $cvCode,
+            "Manually added CV: {$data['applicant_name']}",
+            [
+                'cv_code' => $cvCode,
+                'applicant_email' => $data['applicant_email'],
+                'job_code' => $jobCode,
+                'source' => $source,
+                'created_by' => $user['user_code']
+            ]
+        );
+        
+        // Commit transaction
+        $conn->commit();
+        
+        // Success redirect
+        redirectWithMessage(
+            "/panel/modules/cv-inbox/view.php?id={$cvId}",
+            'CV application added successfully',
+            'success'
+        );
+        
+    } catch (Exception $e) {
+        $conn->rollback();
+        throw $e;
     }
-    
-    echo ApiResponse::success(['cv_id' => $cvId], 'Application added to inbox successfully');
     
 } catch (Exception $e) {
-    Logger::getInstance()->error('Add CV failed', [
-        'error' => $e->getMessage()
+    Logger::getInstance()->error('CV manual entry failed', [
+        'error' => $e->getMessage(),
+        'trace' => $e->getTraceAsString(),
+        'post_data' => $_POST
     ]);
     
-    echo ApiResponse::error('Failed to add application', 500);
+    redirectBack('Failed to add CV application: ' . $e->getMessage());
 }

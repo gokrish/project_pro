@@ -1,15 +1,18 @@
 <?php
 /**
  * Reports Module Entry Point
- * Redirect to reports dashboard
+ * Redirects to daily report
+ * 
+ * @version 2.0
  */
 
 require_once __DIR__ . '/../_common.php';
 
 use ProConsultancy\Core\Permission;
 
-// Manager and Admin only
-Permission::require('reports', 'view');
+// Check basic permission
+Permission::require('reports', 'view_dashboard');
 
+// Redirect to daily report
 header('Location: /panel/modules/reports/daily.php');
 exit;

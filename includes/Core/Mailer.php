@@ -2,25 +2,29 @@
 namespace ProConsultancy\Core;
 
 use Exception;
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\SMTP;
+use PHPMailer\PHPMailer\Exception as PHPMailerException;
 
 /**
  * Email Mailer Class
  * Handles sending emails via SMTP with template support
  * 
  * Features:
+ * - PHPMailer integration
  * - Template-based emails
  * - Email queueing
  * - SMTP configuration
  * - HTML email support
  * - Email logging
  * 
- * @version 5.0
- * @package ProConsultancy\Core
+ * @version 2.0
  */
 class Mailer {
     
     private array $config;
     private bool $useQueue = false;
+    private static ?Mailer $instance = null;
     
     /**
      * Constructor
@@ -43,7 +47,43 @@ class Mailer {
     }
     
     /**
-     * Send email
+     * Get singleton instance
+     * 
+     * @return Mailer
+     */
+    public static function getInstance(): Mailer {
+        if (self::$instance === null) {
+            self::$instance = new self();
+        }
+        return self::$instance;
+    }
+    
+    /**
+     * STATIC METHOD: Send email (for backward compatibility)
+     * 
+     * Usage: Mailer::send($to, $subject, $templateOrBody, $variables)
+     * 
+     * @param string|array $to Recipient email(s)
+     * @param string $subject Email subject
+     * @param string $templateOrBody Template name or HTML body
+     * @param array $variables Template variables or email options
+     * @return bool Success status
+     */
+    public static function send($to, string $subject, string $templateOrBody, array $variables = []): bool {
+        $instance = self::getInstance();
+        
+        // Check if this is a template name or direct HTML
+        if (strpos($templateOrBody, '<') === false && strpos($templateOrBody, '>') === false) {
+            // Looks like a template name
+            return $instance->sendFromTemplate($to, $subject, $templateOrBody, $variables);
+        } else {
+            // Direct HTML body
+            return $instance->sendDirect($to, $subject, $templateOrBody, $variables);
+        }
+    }
+    
+    /**
+     * Send email directly with HTML body
      * 
      * @param string|array $to Recipient email(s)
      * @param string $subject Email subject
@@ -51,7 +91,7 @@ class Mailer {
      * @param array $options Additional options (cc, bcc, attachments, reply_to)
      * @return bool Success status
      */
-    public function send($to, string $subject, string $body, array $options = []): bool {
+    public function sendDirect($to, string $subject, string $body, array $options = []): bool {
         try {
             // Validate recipient
             $recipients = is_array($to) ? $to : [$to];
@@ -69,29 +109,64 @@ class Mailer {
             // Build complete HTML email
             $fullBody = $this->buildEmailWrapper($body);
             
-            // Build headers
-            $headers = $this->buildHeaders($options);
+            // Create PHPMailer instance
+            $mail = $this->createPHPMailerInstance();
             
-            // Send via mail() function
-            // For production, use PHPMailer or SwiftMailer for better SMTP support
-            $result = mail(
-                implode(', ', $recipients),
-                $subject,
-                $fullBody,
-                $headers
-            );
+            // Set recipients
+            foreach ($recipients as $email) {
+                $mail->addAddress($email);
+            }
+            
+            // Set CC
+            if (isset($options['cc'])) {
+                $ccList = is_array($options['cc']) ? $options['cc'] : [$options['cc']];
+                foreach ($ccList as $cc) {
+                    $mail->addCC($cc);
+                }
+            }
+            
+            // Set BCC
+            if (isset($options['bcc'])) {
+                $bccList = is_array($options['bcc']) ? $options['bcc'] : [$options['bcc']];
+                foreach ($bccList as $bcc) {
+                    $mail->addBCC($bcc);
+                }
+            }
+            
+            // Set Reply-To
+            if (isset($options['reply_to'])) {
+                $mail->addReplyTo($options['reply_to']);
+            }
+            
+            // Add attachments
+            if (isset($options['attachments']) && is_array($options['attachments'])) {
+                foreach ($options['attachments'] as $attachment) {
+                    if (file_exists($attachment)) {
+                        $mail->addAttachment($attachment);
+                    }
+                }
+            }
+            
+            // Set subject and body
+            $mail->Subject = $subject;
+            $mail->Body = $fullBody;
+            $mail->AltBody = strip_tags($body);
+            
+            // Send email
+            $result = $mail->send();
             
             // Log email
             if ($result) {
                 Logger::getInstance()->info('Email sent successfully', [
                     'to' => $recipients,
                     'subject' => $subject,
-                    'method' => 'direct'
+                    'method' => 'phpmailer'
                 ]);
             } else {
                 Logger::getInstance()->error('Email failed to send', [
                     'to' => $recipients,
-                    'subject' => $subject
+                    'subject' => $subject,
+                    'error' => $mail->ErrorInfo
                 ]);
             }
             
@@ -109,7 +184,82 @@ class Mailer {
     }
     
     /**
-     * Send email from template
+     * Send email from template file
+     * 
+     * @param string|array $to Recipient email(s)
+     * @param string $subject Email subject (can contain {{variables}})
+     * @param string $templateName Template filename (without .php)
+     * @param array $variables Template variables
+     * @return bool Success status
+     */
+    public function sendFromTemplate($to, string $subject, string $templateName, array $variables = []): bool {
+        try {
+            // Load template content
+            $body = $this->loadTemplate($templateName, $variables);
+            
+            if (!$body) {
+                throw new Exception("Email template not found: {$templateName}");
+            }
+            
+            // Replace variables in subject
+            $subject = $this->replacePlaceholders($subject, $variables);
+            
+            // Send email
+            return $this->sendDirect($to, $subject, $body);
+            
+        } catch (Exception $e) {
+            Logger::getInstance()->error('Template email failed', [
+                'template' => $templateName,
+                'to' => $to,
+                'error' => $e->getMessage()
+            ]);
+            return false;
+        }
+    }
+    
+    /**
+     * Load email template from file
+     * 
+     * @param string $templateName Template filename
+     * @param array $variables Variables to pass to template
+     * @return string|false Template content
+     */
+    private function loadTemplate(string $templateName, array $variables = []) {
+        // Look for template in multiple locations
+        $possiblePaths = [
+            __DIR__ . '/../../modules/reports/templates/' . $templateName . '.php',
+            __DIR__ . '/../../templates/emails/' . $templateName . '.php',
+            __DIR__ . '/../../../templates/emails/' . $templateName . '.php',
+        ];
+        
+        foreach ($possiblePaths as $templatePath) {
+            if (file_exists($templatePath)) {
+                // Extract variables for template
+                extract($variables);
+                
+                // Start output buffering
+                ob_start();
+                
+                // Include template
+                include $templatePath;
+                
+                // Get buffered content
+                $content = ob_get_clean();
+                
+                return $content;
+            }
+        }
+        
+        Logger::getInstance()->error('Template file not found', [
+            'template' => $templateName,
+            'searched_paths' => $possiblePaths
+        ]);
+        
+        return false;
+    }
+    
+    /**
+     * Send email from database template
      * 
      * @param string|array $to Recipient email(s)
      * @param string $templateCode Template code (e.g., 'cv_direct', 'cv_job_application')
@@ -117,7 +267,7 @@ class Mailer {
      * @param array $options Additional options
      * @return bool Success status
      */
-    public function sendFromTemplate($to, string $templateCode, array $variables = [], array $options = []): bool {
+    public function sendFromDatabaseTemplate($to, string $templateCode, array $variables = [], array $options = []): bool {
         try {
             // Get template from database
             $template = $this->getTemplate($templateCode);
@@ -131,10 +281,10 @@ class Mailer {
             $body = $this->replacePlaceholders($template['body_html'], $variables);
             
             // Send email
-            return $this->send($to, $subject, $body, $options);
+            return $this->sendDirect($to, $subject, $body, $options);
             
         } catch (Exception $e) {
-            Logger::getInstance()->error('Template email failed', [
+            Logger::getInstance()->error('Database template email failed', [
                 'template' => $templateCode,
                 'to' => $to,
                 'error' => $e->getMessage()
@@ -232,7 +382,7 @@ class Mailer {
             $result = $stmt->get_result();
             
             $sent = 0;
-            $mailer = new self();
+            $mailer = self::getInstance();
             
             while ($email = $result->fetch_assoc()) {
                 $options = json_decode($email['options'], true) ?? [];
@@ -248,7 +398,7 @@ class Mailer {
                 // Temporarily disable queueing to prevent infinite loop
                 $mailer->useQueue = false;
                 
-                $success = $mailer->send(
+                $success = $mailer->sendDirect(
                     explode(',', $email['to_email']),
                     $email['subject'],
                     $email['body'],
@@ -297,6 +447,41 @@ class Mailer {
     }
     
     /**
+     * Create configured PHPMailer instance
+     * 
+     * @return PHPMailer
+     */
+    private function createPHPMailerInstance(): PHPMailer {
+        $mail = new PHPMailer(true);
+        
+        try {
+            // Server settings
+            $mail->isSMTP();
+            $mail->Host = $this->config['smtp_host'];
+            $mail->SMTPAuth = true;
+            $mail->Username = $this->config['smtp_username'];
+            $mail->Password = $this->config['smtp_password'];
+            $mail->SMTPSecure = $this->config['smtp_encryption'] === 'ssl' ? PHPMailer::ENCRYPTION_SMTPS : PHPMailer::ENCRYPTION_STARTTLS;
+            $mail->Port = $this->config['smtp_port'];
+            
+            // Sender
+            $mail->setFrom($this->config['from_email'], $this->config['from_name']);
+            
+            // Content
+            $mail->isHTML(true);
+            $mail->CharSet = 'UTF-8';
+            
+            return $mail;
+            
+        } catch (PHPMailerException $e) {
+            Logger::getInstance()->error('PHPMailer configuration failed', [
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
+        }
+    }
+    
+    /**
      * Get email template from database
      * 
      * @param string $templateCode Template code
@@ -338,49 +523,15 @@ class Mailer {
      */
     private function replacePlaceholders(string $text, array $variables): string {
         foreach ($variables as $key => $value) {
+            // Convert arrays/objects to strings
+            if (is_array($value) || is_object($value)) {
+                $value = json_encode($value);
+            }
+            
             // Replace both {{key}} and {key} formats
             $text = str_replace(["{{{$key}}}", "{{" . $key . "}}"], $value, $text);
         }
         return $text;
-    }
-    
-    /**
-     * Build email headers
-     * 
-     * @param array $options Email options
-     * @return string Headers string
-     */
-    private function buildHeaders(array $options = []): string {
-        $headers = [];
-        
-        // From header
-        $headers[] = "From: {$this->config['from_name']} <{$this->config['from_email']}>";
-        
-        // Reply-To
-        if (isset($options['reply_to'])) {
-            $headers[] = "Reply-To: {$options['reply_to']}";
-        } else {
-            $headers[] = "Reply-To: {$this->config['from_email']}";
-        }
-        
-        // CC
-        if (isset($options['cc'])) {
-            $cc = is_array($options['cc']) ? implode(', ', $options['cc']) : $options['cc'];
-            $headers[] = "Cc: {$cc}";
-        }
-        
-        // BCC
-        if (isset($options['bcc'])) {
-            $bcc = is_array($options['bcc']) ? implode(', ', $options['bcc']) : $options['bcc'];
-            $headers[] = "Bcc: {$bcc}";
-        }
-        
-        // MIME headers
-        $headers[] = "MIME-Version: 1.0";
-        $headers[] = "Content-Type: text/html; charset=UTF-8";
-        $headers[] = "X-Mailer: ProConsultancy Mailer v5.0";
-        
-        return implode("\r\n", $headers);
     }
     
     /**
@@ -447,10 +598,27 @@ class Mailer {
         table {
             width: 100%;
             border-collapse: collapse;
+            margin: 20px 0;
+        }
+        table th {
+            background-color: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            border: 1px solid #e0e0e0;
         }
         table td {
             padding: 10px;
             border: 1px solid #e0e0e0;
+        }
+        .kpi-card {
+            background: #e9f7ff;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
+        .kpi-card strong {
+            color: #007bff;
         }
     </style>
 </head>
@@ -498,6 +666,6 @@ HTML;
             <p>If you received this email, your email configuration is working correctly!</p>
         ";
         
-        return $this->send($to, $subject, $body);
+        return $this->sendDirect($to, $subject, $body);
     }
 }

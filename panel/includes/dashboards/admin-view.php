@@ -3,7 +3,7 @@
  * Admin Dashboard - Unified view for team admin
  * Combines manager, coordinator, and admin functions
  * 
- * @version 5.0
+ * @version 2.0
  */
 
 use ProConsultancy\Core\Database;

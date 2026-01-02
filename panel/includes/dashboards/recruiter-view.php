@@ -2,7 +2,7 @@
 /**
  * Recruiter Dashboard - Focused on daily recruitment tasks
  * 
- * @version 5.1
+ * @version 2.0
  */
 
 use ProConsultancy\Core\Database;

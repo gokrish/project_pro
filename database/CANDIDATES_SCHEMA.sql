@@ -1,16 +1,29 @@
 -- ============================================================================
--- OPTIMIZED CANDIDATES SCHEMA
--- Focus: Easy filtering, flexible skills, resume parsing ready
+-- CANDIDATES MODULE - FINAL PRODUCTION SCHEMA
+-- Version: 2.0
+-- Focus: Business-first, recruiter-friendly
 -- ============================================================================
 
+SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- Drop existing tables
+DROP TABLE IF EXISTS `candidate_hr_comments`;
+DROP TABLE IF EXISTS `candidate_communications`;
+DROP TABLE IF EXISTS `candidate_status_history`;
+DROP TABLE IF EXISTS `candidate_edit_history`;
+DROP TABLE IF EXISTS `candidate_resume_parse`;
+DROP TABLE IF EXISTS `candidate_skills`;
+DROP TABLE IF EXISTS `job_skills`;
+
 -- ============================================================================
--- 1. CANDIDATES TABLE - Main Profile (Simplified Form)
+-- 1. CANDIDATES TABLE 
 -- ============================================================================
 CREATE TABLE `candidates` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `candidate_code` VARCHAR(50) UNIQUE NOT NULL,
     
-    -- ========== BASIC INFO (Required - Simple Form) ==========
+    -- ========== BASIC INFO (Required) ==========
     `candidate_name` VARCHAR(255) NOT NULL,
     `email` VARCHAR(255) NOT NULL,
     `alternate_email` VARCHAR(255),
@@ -18,59 +31,53 @@ CREATE TABLE `candidates` (
     `phone_alternate` VARCHAR(20),
     `linkedin_url` VARCHAR(255),
     
-    -- ========== LOCATION & AVAILABILITY (Dropdown-based) ==========
+    -- ========== LOCATION ==========
     `current_location` ENUM(
         'Belgium', 'Netherlands', 'Luxembourg', 
         'Germany', 'France', 'India', 'Other'
     ) DEFAULT 'Belgium',
-    `willing_to_relocate` BOOLEAN DEFAULT 0,
+    `willing_to_join` BOOLEAN DEFAULT 0,
     
-    -- ========== WORK AUTHORIZATION (Foreign Key) ==========
-    `work_authorization_id` INT NULL COMMENT 'FK to work_authorization table',
-    
-    -- ========== CURRENT EMPLOYMENT ==========
+    -- ========== WORK STATUS with applied for which job ==========
     `current_employer` VARCHAR(255),
     `current_position` VARCHAR(255),
-    `current_agency` VARCHAR(255) COMMENT 'If working via agency',
+    `current_agency` VARCHAR(255),
     `current_working_status` ENUM(
         'Freelance_Self', 
         'Freelance_Company', 
         'Employee', 
         'Unemployed'
     ),
-    
-    -- ========== SALARY & RATES (Flexible for both models) ==========
-    `current_salary` DECIMAL(12,2) COMMENT 'Annual salary for employees',
-    `expected_salary` DECIMAL(12,2) COMMENT 'Expected annual salary',
+    `work_authorization_id` INT COMMENT 'FK to work_authorization',
+    `professional_summary` TEXT,
+    `role_addressed` text DEFAULT NULL,
+    -- ========== KNOWN Languages INFO ==========
+    `languages` JSON COMMENT '["English","French","Dutch"]',
+    -- ========== COMPENSATION (Both models supported) ==========
+    `current_salary` DECIMAL(12,2) COMMENT 'Annual for employees',
+    `expected_salary` DECIMAL(12,2) COMMENT 'Annual expected',
     `current_daily_rate` DECIMAL(10,2) COMMENT 'For freelancers',
-    `expected_daily_rate` DECIMAL(10,2) COMMENT 'Expected daily rate',
+    `expected_daily_rate` DECIMAL(10,2) COMMENT 'For freelancers',
     
     -- ========== AVAILABILITY ==========
     `notice_period_days` INT COMMENT 'Notice period in days',
     `available_from` DATE COMMENT 'When can start',
     
-    -- ========== PROFESSIONAL SUMMARY ==========
-    `professional_summary` TEXT COMMENT 'Brief bio/summary',
-    
-    -- ========== LANGUAGES (Multi-select, stored as JSON) ==========
-    `languages` JSON COMMENT '["English", "French", "Dutch", "German"]',
-    
-    -- ========== LEAD CLASSIFICATION ==========
+    -- ========== LEAD MANAGEMENT ==========
     `lead_type` ENUM('Hot', 'Warm', 'Cold', 'Blacklist') DEFAULT 'Warm',
-    `lead_type_role` ENUM('Payroll', 'Recruitment', 'Both', 'Invoice'),
+    `lead_type_role` ENUM('Payroll', 'Recruitment', 'InProgress', 'WaitingConfirmation'),
     
     -- ========== STATUS WORKFLOW ==========
     `status` ENUM(
         'new',          -- Just added
         'screening',    -- Being reviewed
-        'qualified',    -- Ready for submissions
+        'qualified',    -- Ready for jobs
         'active',       -- Has active submissions
         'placed',       -- Successfully placed
         'rejected',     -- Failed screening
-        'archived'      -- Inactive/not interested
+        'archived'      -- Inactive
     ) DEFAULT 'new',
     
-    -- ========== SCREENING ==========
     `screening_completed_at` TIMESTAMP NULL,
     `screening_notes` TEXT,
     `screening_result` ENUM('pass', 'fail', 'pending') DEFAULT 'pending',
@@ -79,11 +86,11 @@ CREATE TABLE `candidates` (
     `follow_up_status` ENUM('Done', 'Not_Done', 'Scheduled') DEFAULT 'Not_Done',
     `follow_up_date` DATE,
     `last_contacted_date` DATE,
-    `face_to_face_date` DATE COMMENT 'Interview date',
+    `face_to_face_date` DATE,
     
     -- ========== DOCUMENTS ==========
-    `candidate_cv` VARCHAR(500) COMMENT 'Original CV path',
-    `consultancy_cv` VARCHAR(500) COMMENT 'Formatted CV path',
+    `candidate_cv` VARCHAR(500),
+    `consultancy_cv` VARCHAR(500),
     `cv_last_updated` TIMESTAMP NULL,
     
     -- ========== CONSENT & GDPR ==========
@@ -91,27 +98,27 @@ CREATE TABLE `candidates` (
     `consent_date` DATE,
     `consent_type` ENUM('Email', 'Phone', 'InPerson', 'Online'),
     
-    -- ========== ASSIGNMENT & OWNERSHIP ==========
-    `assigned_to` VARCHAR(50) COMMENT 'user_code of recruiter',
+    -- ========== OWNERSHIP ==========
+    `assigned_to` VARCHAR(50) COMMENT 'user_code',
     `created_by` VARCHAR(50),
     
-    -- ========== ACTIVITY COUNTERS (Auto-updated by triggers) ==========
+    -- ========== COUNTERS (Auto-updated) ==========
     `total_submissions` INT DEFAULT 0,
     `total_interviews` INT DEFAULT 0,
     `total_placements` INT DEFAULT 0,
     `last_submission_date` DATE,
     `last_interview_date` DATE,
     
-    -- ========== NOTES & EXTRA ==========
-    `internal_notes` TEXT COMMENT 'Private notes for recruiters',
-    `extra_details` TEXT COMMENT 'Any additional information',
+    -- ========== NOTES ==========
+    `internal_notes` TEXT COMMENT 'Private recruiter notes',
+    `extra_details` TEXT,
     
     -- ========== TIMESTAMPS ==========
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     `deleted_at` TIMESTAMP NULL,
     
-    -- ========== INDEXES for FAST FILTERING ==========
+    -- ========== INDEXES ==========
     INDEX `idx_code` (`candidate_code`),
     INDEX `idx_email` (`email`),
     INDEX `idx_status` (`status`),
@@ -122,23 +129,20 @@ CREATE TABLE `candidates` (
     INDEX `idx_status_screening` (`status`, `screening_result`),
     INDEX `idx_available` (`available_from`),
     
-    -- Full-text search on name and summary
     FULLTEXT INDEX `ft_name_summary` (`candidate_name`, `professional_summary`)
     
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='Main candidate profiles - optimized for filtering and matching';
+COMMENT='Candidate profiles - simplified for fast entry';
 
 -- ============================================================================
--- 2. CANDIDATE SKILLS - Normalized for Easy Filtering
+-- 2. CANDIDATE SKILLS (Normalized for filtering)
 -- ============================================================================
 CREATE TABLE `candidate_skills` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `candidate_code` VARCHAR(50) NOT NULL,
-    `skill_id` INT NOT NULL COMMENT 'FK to technical_skills',
+    `skill_id` INT NOT NULL,
     `proficiency_level` ENUM('Beginner', 'Intermediate', 'Advanced', 'Expert') DEFAULT 'Intermediate',
-    `years_of_experience` DECIMAL(3,1) COMMENT 'Years with this skill',
-    `is_primary` BOOLEAN DEFAULT 0 COMMENT 'Primary/core skill',
-    `added_by` VARCHAR(50) COMMENT 'Manual or parsed',
+    `added_by` VARCHAR(50),
     `added_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
     FOREIGN KEY (`candidate_code`) REFERENCES `candidates`(`candidate_code`) ON DELETE CASCADE,
@@ -147,14 +151,12 @@ CREATE TABLE `candidate_skills` (
     
     INDEX `idx_candidate` (`candidate_code`),
     INDEX `idx_skill` (`skill_id`),
-    INDEX `idx_proficiency` (`proficiency_level`),
-    INDEX `idx_primary` (`is_primary`)
+    INDEX `idx_proficiency` (`proficiency_level`)
     
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='Candidate skills - normalized for easy filtering and job matching';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ============================================================================
--- 3. TECHNICAL SKILLS - Master List
+-- 3. TECHNICAL SKILLS (Master list)
 -- ============================================================================
 CREATE TABLE `technical_skills` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -165,34 +167,74 @@ CREATE TABLE `technical_skills` (
         'Soft_Skills', 'Industry', 'Other'
     ) DEFAULT 'Other',
     `is_active` BOOLEAN DEFAULT 1,
-    `usage_count` INT DEFAULT 0 COMMENT 'How many candidates have this skill',
+    `usage_count` INT DEFAULT 0,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
     INDEX `idx_category` (`skill_category`),
     INDEX `idx_active` (`is_active`),
-    INDEX `idx_usage` (`usage_count`)
+    INDEX `idx_name` (`skill_name`)
     
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='Master skills list - categorized for better organization';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Seed common skills
+INSERT INTO `technical_skills` (`skill_name`, `skill_category`) VALUES
+-- Programming
+('Java', 'Programming'),
+('Python', 'Programming'),
+('JavaScript', 'Programming'),
+('C#', 'Programming'),
+('PHP', 'Programming'),
+('Ruby', 'Programming'),
+('Go', 'Programming'),
+('TypeScript', 'Programming'),
+-- Frameworks
+('Spring Boot', 'Framework'),
+('React', 'Framework'),
+('Angular', 'Framework'),
+('Vue.js', 'Framework'),
+('Django', 'Framework'),
+('.NET', 'Framework'),
+('Laravel', 'Framework'),
+('Node.js', 'Framework'),
+-- Databases
+('MySQL', 'Database'),
+('PostgreSQL', 'Database'),
+('MongoDB', 'Database'),
+('Oracle', 'Database'),
+('SQL Server', 'Database'),
+('Redis', 'Database'),
+-- Cloud
+('AWS', 'Cloud'),
+('Azure', 'Cloud'),
+('Google Cloud', 'Cloud'),
+-- DevOps
+('Docker', 'DevOps'),
+('Kubernetes', 'DevOps'),
+('Jenkins', 'DevOps'),
+('Git', 'DevOps'),
+('CI/CD', 'DevOps'),
+-- Tools
+('JIRA', 'Tools'),
+('Confluence', 'Tools'),
+('Postman', 'Tools'),
+-- Soft Skills
+('Team Leadership', 'Soft_Skills'),
+('Communication', 'Soft_Skills'),
+('Problem Solving', 'Soft_Skills'),
+('Agile/Scrum', 'Soft_Skills');
 
 -- ============================================================================
--- 4. WORK AUTHORIZATION - Reference Table
+-- 4. WORK AUTHORIZATION
 -- ============================================================================
 CREATE TABLE `work_authorization` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
     `status_name` VARCHAR(100) NOT NULL,
-    `description` TEXT,
     `requires_sponsorship` BOOLEAN DEFAULT 0,
     `display_order` INT DEFAULT 0,
     `is_active` BOOLEAN DEFAULT 1,
-    
-    INDEX `idx_active` (`is_active`),
-    INDEX `idx_order` (`display_order`)
-    
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='Work authorization statuses';
+    INDEX `idx_active` (`is_active`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Sample data for work authorization
 INSERT INTO `work_authorization` (`status_name`, `requires_sponsorship`, `display_order`) VALUES
 ('EU Citizen', 0, 1),
 ('EU Permanent Resident', 0, 2),
@@ -202,154 +244,96 @@ INSERT INTO `work_authorization` (`status_name`, `requires_sponsorship`, `displa
 ('Other', 0, 6);
 
 -- ============================================================================
--- 5. CV INBOX - Career Page Applications (Linked to Jobs)
+-- 5. COMMUNICATIONS LOG
 -- ============================================================================
-CREATE TABLE `cv_inbox` (
+CREATE TABLE `candidate_communications` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    `cv_code` VARCHAR(50) UNIQUE NOT NULL,
+    `candidate_code` VARCHAR(50) NOT NULL,
+    `communication_type` ENUM('Call', 'Email', 'Meeting', 'WhatsApp', 'LinkedIn', 'Other') NOT NULL,
+    `direction` ENUM('Inbound', 'Outbound') DEFAULT 'Outbound',
+    `subject` VARCHAR(255),
+    `notes` TEXT NOT NULL,
+    `duration_minutes` INT,
+    `next_action` VARCHAR(255),
+    `next_action_date` DATE,
+    `created_by` VARCHAR(50),
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
-    -- ========== JOB REFERENCE (Critical) ==========
-    `job_id` INT UNSIGNED NULL COMMENT 'FK to jobs.id if applied for specific job',
-    `job_code` VARCHAR(50) NULL COMMENT 'job_code for reference',
-    `job_refno` VARCHAR(50) NULL COMMENT 'Public job reference number',
+    FOREIGN KEY (`candidate_code`) REFERENCES `candidates`(`candidate_code`) ON DELETE CASCADE,
+    INDEX `idx_candidate` (`candidate_code`),
+    INDEX `idx_type` (`communication_type`),
+    INDEX `idx_created` (`created_at`)
     
-    -- ========== APPLICANT INFO (From Career Page Form) ==========
-    `applicant_name` VARCHAR(255) NOT NULL,
-    `applicant_email` VARCHAR(255) NOT NULL,
-    `applicant_phone` VARCHAR(50),
-    
-    -- ========== CV & DOCUMENTS ==========
-    `cv_path` VARCHAR(500) NOT NULL,
-    `cover_letter_path` VARCHAR(500),
-    
-    -- ========== SOURCE & CHANNEL ==========
-    `source` ENUM('Website_Career_Page', 'LinkedIn', 'Job_Board', 'Referral', 'Direct') DEFAULT 'Website_Career_Page',
-    `referrer_url` VARCHAR(500) COMMENT 'Where they came from',
-    
-    -- ========== PROCESSING STATUS ==========
-    `status` ENUM(
-        'new',          -- Just submitted
-        'screening',    -- Being reviewed
-        'shortlisted',  -- Looks promising
-        'converted',    -- Converted to candidate
-        'rejected',     -- Not suitable
-        'spam'          -- Marked as spam
-    ) DEFAULT 'new',
-    
-    -- ========== REVIEW TRACKING ==========
-    `reviewed_by` VARCHAR(50) COMMENT 'user_code',
-    `reviewed_at` TIMESTAMP NULL,
-    `review_notes` TEXT,
-    `rejection_reason` TEXT,
-    
-    -- ========== CONVERSION ==========
-    `converted_to_candidate_code` VARCHAR(50) NULL COMMENT 'If converted to candidate',
-    `converted_by` VARCHAR(50),
-    `converted_at` TIMESTAMP NULL,
-    
-    -- ========== TIMESTAMPS ==========
-    `submitted_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    `deleted_at` TIMESTAMP NULL,
-    
-    -- ========== FOREIGN KEYS ==========
-    FOREIGN KEY (`job_id`) REFERENCES `jobs`(`id`) ON DELETE SET NULL,
-    FOREIGN KEY (`converted_to_candidate_code`) REFERENCES `candidates`(`candidate_code`) ON DELETE SET NULL,
-    
-    -- ========== INDEXES for FILTERING ==========
-    INDEX `idx_code` (`cv_code`),
-    INDEX `idx_job` (`job_id`),
-    INDEX `idx_job_code` (`job_code`),
-    INDEX `idx_job_refno` (`job_refno`),
-    INDEX `idx_status` (`status`),
-    INDEX `idx_email` (`applicant_email`),
-    INDEX `idx_submitted` (`submitted_at`),
-    INDEX `idx_reviewed` (`reviewed_by`, `reviewed_at`)
-    
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='CV Inbox - Career page applications linked to specific jobs';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ============================================================================
--- 6. CANDIDATE EDIT HISTORY - Track All Changes
+-- 6. HR COMMENTS (Confidential)
+-- ============================================================================
+CREATE TABLE `candidate_hr_comments` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `candidate_code` VARCHAR(50) NOT NULL,
+    `comment_type` ENUM(
+        'Screening', 'Interview_Feedback', 'General', 
+        'Manager_Review', 'Red_Flag', 'Recommendation'
+    ) NOT NULL,
+    `comment` TEXT NOT NULL,
+    `is_confidential` BOOLEAN DEFAULT 1,
+    `created_by` VARCHAR(50),
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (`candidate_code`) REFERENCES `candidates`(`candidate_code`) ON DELETE CASCADE,
+    INDEX `idx_candidate` (`candidate_code`),
+    INDEX `idx_type` (`comment_type`)
+    
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================================
+-- 7. STATUS HISTORY
+-- ============================================================================
+CREATE TABLE `candidate_status_history` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `candidate_code` VARCHAR(50) NOT NULL,
+    `old_status` VARCHAR(50),
+    `new_status` VARCHAR(50) NOT NULL,
+    `changed_by` VARCHAR(50),
+    `changed_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `reason` TEXT,
+    
+    FOREIGN KEY (`candidate_code`) REFERENCES `candidates`(`candidate_code`) ON DELETE CASCADE,
+    INDEX `idx_candidate` (`candidate_code`),
+    INDEX `idx_changed_at` (`changed_at`)
+    
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================================
+-- 8. EDIT HISTORY (Audit trail)
 -- ============================================================================
 CREATE TABLE `candidate_edit_history` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
     `candidate_code` VARCHAR(50) NOT NULL,
-    `field_name` VARCHAR(100) NOT NULL COMMENT 'Which field was edited',
+    `field_name` VARCHAR(100) NOT NULL,
     `old_value` TEXT,
     `new_value` TEXT,
-    `edit_type` ENUM('manual', 'import', 'parsed', 'system') DEFAULT 'manual',
+    `edit_type` ENUM('manual', 'import', 'system') DEFAULT 'manual',
     `edited_by` VARCHAR(50),
-    `edited_by_name` VARCHAR(100),
     `edited_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `edit_reason` VARCHAR(255),
     
     FOREIGN KEY (`candidate_code`) REFERENCES `candidates`(`candidate_code`) ON DELETE CASCADE,
-    
     INDEX `idx_candidate` (`candidate_code`),
-    INDEX `idx_field` (`field_name`),
-    INDEX `idx_edited_by` (`edited_by`),
-    INDEX `idx_edited_at` (`edited_at`)
+    INDEX `idx_field` (`field_name`)
     
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='Complete audit trail of candidate profile changes';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ============================================================================
--- 7. RESUME PARSING DATA - Structured Parsed Information
--- ============================================================================
-CREATE TABLE `candidate_resume_parse` (
-    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    `candidate_code` VARCHAR(50) NOT NULL,
-    
-    -- ========== PARSING METADATA ==========
-    `cv_file_path` VARCHAR(500) NOT NULL,
-    `parse_date` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `parser_version` VARCHAR(50),
-    `parse_status` ENUM('success', 'partial', 'failed') DEFAULT 'success',
-    
-    -- ========== PARSED DATA (JSON for flexibility) ==========
-    `parsed_contact_info` JSON COMMENT '{"name": "", "email": "", "phone": "", "linkedin": ""}',
-    `parsed_summary` TEXT,
-    `parsed_skills` JSON COMMENT '["skill1", "skill2"]',
-    `parsed_experience` JSON COMMENT '[{"company": "", "role": "", "duration": ""}]',
-    `parsed_education` JSON COMMENT '[{"degree": "", "institution": "", "year": ""}]',
-    `parsed_certifications` JSON COMMENT '["cert1", "cert2"]',
-    `parsed_languages` JSON COMMENT '["English", "French"]',
-    
-    -- ========== CONFIDENCE SCORES ==========
-    `confidence_score` DECIMAL(3,2) COMMENT '0.00 to 1.00',
-    `skills_confidence` DECIMAL(3,2),
-    `experience_confidence` DECIMAL(3,2),
-    
-    -- ========== MANUAL REVIEW ==========
-    `reviewed` BOOLEAN DEFAULT 0,
-    `reviewed_by` VARCHAR(50),
-    `reviewed_at` TIMESTAMP NULL,
-    `review_notes` TEXT,
-    
-    -- ========== RAW DATA ==========
-    `raw_text` LONGTEXT COMMENT 'Extracted raw text from CV',
-    `raw_json` JSON COMMENT 'Complete parser response',
-    
-    FOREIGN KEY (`candidate_code`) REFERENCES `candidates`(`candidate_code`) ON DELETE CASCADE,
-    
-    INDEX `idx_candidate` (`candidate_code`),
-    INDEX `idx_parse_date` (`parse_date`),
-    INDEX `idx_status` (`parse_status`)
-    
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='Resume parsing results - structured for AI processing';
-
--- ============================================================================
--- 8. JOB SKILLS REQUIREMENTS - For Matching
+-- 9. JOB SKILLS (For matching)
 -- ============================================================================
 CREATE TABLE `job_skills` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `job_code` VARCHAR(50) NOT NULL,
     `skill_id` INT NOT NULL,
-    `is_required` BOOLEAN DEFAULT 1 COMMENT '1=must have, 0=nice to have',
-    `minimum_experience_years` DECIMAL(3,1) DEFAULT 0,
-    `priority` INT DEFAULT 0 COMMENT 'Higher = more important',
+    `is_required` BOOLEAN DEFAULT 1,
+    `minimum_years` DECIMAL(3,1) DEFAULT 0,
+    `priority` INT DEFAULT 0,
     `added_by` VARCHAR(50),
     `added_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
@@ -358,12 +342,56 @@ CREATE TABLE `job_skills` (
     
     INDEX `idx_job` (`job_code`),
     INDEX `idx_skill` (`skill_id`),
-    INDEX `idx_required` (`is_required`),
-    INDEX `idx_priority` (`priority`)
+    INDEX `idx_required` (`is_required`)
     
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='Job skill requirements - for candidate matching algorithms';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ============================================================================
--- END OF OPTIMIZED SCHEMA
+-- 10. RESUME PARSE (Future AI integration)
 -- ============================================================================
+CREATE TABLE `candidate_resume_parse` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `candidate_code` VARCHAR(50) NOT NULL,
+    `cv_file_path` VARCHAR(500) NOT NULL,
+    `parse_date` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `parse_status` ENUM('success', 'partial', 'failed') DEFAULT 'success',
+    `parsed_skills` JSON,
+    `parsed_summary` TEXT,
+    `confidence_score` DECIMAL(3,2),
+    `reviewed` BOOLEAN DEFAULT 0,
+    `reviewed_by` VARCHAR(50),
+    `reviewed_at` TIMESTAMP NULL,
+    
+    FOREIGN KEY (`candidate_code`) REFERENCES `candidates`(`candidate_code`) ON DELETE CASCADE,
+    INDEX `idx_candidate` (`candidate_code`)
+    
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- Candidate indexes (for faster reporting)
+CREATE INDEX idx_candidates_created_at ON candidates(created_at);
+CREATE INDEX idx_candidates_status ON candidates(status);
+CREATE INDEX idx_candidates_assigned_to ON candidates(assigned_to);
+CREATE INDEX idx_candidates_follow_up_date ON candidates(follow_up_date);
+
+-- Submission indexes
+CREATE INDEX idx_submissions_submitted_at ON submissions(submitted_at);
+CREATE INDEX idx_submissions_submitted_by ON submissions(submitted_by);
+
+-- Status log indexes
+CREATE INDEX idx_status_log_changed_at ON candidate_status_log(changed_at);
+CREATE INDEX idx_status_log_candidate ON candidate_status_log(candidate_code);
+
+-- Communication indexes
+CREATE INDEX idx_communications_contacted_at ON candidate_communications(contacted_at);
+CREATE INDEX idx_communications_contacted_by ON candidate_communications(contacted_by);
+-- ============================================================================
+-- VERIFICATION
+-- ============================================================================
+SELECT 
+    'Candidate schema installed successfully!' as message,
+    (SELECT COUNT(*) FROM information_schema.tables 
+     WHERE table_schema = DATABASE() 
+     AND table_name IN ('candidates', 'candidate_skills', 'technical_skills', 
+                        'candidate_communications', 'candidate_hr_comments')) as tables_created;

@@ -6,7 +6,7 @@
  */
 
 require_once __DIR__ . '/../../_common.php';
-
+use ProConsultancy\Core\Logger;
 use ProConsultancy\Core\Permission;
 use ProConsultancy\Core\Database;
 use ProConsultancy\Core\ApiResponse;
@@ -67,7 +67,7 @@ try {
     $conn->query("DELETE FROM applications WHERE candidate_code = '{$candidateCode}'");
     $conn->query("DELETE FROM candidate_documents WHERE candidate_code = '{$candidateCode}'");
     $conn->query("DELETE FROM candidate_notes WHERE candidate_code = '{$candidateCode}'");
-    $conn->query("DELETE FROM activity_log WHERE module = 'candidates' AND record_id = '{$candidateCode}'");
+    $conn->query("DELETE FROM candidate_activity_log WHERE module = 'candidates' AND record_id = '{$candidateCode}'");
     
     // Delete candidate
     $stmt = $conn->prepare("DELETE FROM candidates WHERE candidate_code = ?");

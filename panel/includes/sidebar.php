@@ -340,45 +340,34 @@ $conn = $db->getConnection();
             <span class="menu-header-text">Analytics</span>
         </li>
 
-        <!-- Reports -->
-        <?php if (canAccess('reports', 'view_daily')): ?>
-        <li class="menu-item <?= $currentModule === 'reports' ? 'active open' : '' ?>">
+        <!-- Reports Module -->
+        <?php if (canAccess('reports', 'view_dashboard')): ?>
+        <li class="menu-item <?= $currentModule === 'reports' ? 'open' : '' ?>">
             <a href="javascript:void(0);" class="menu-link menu-toggle">
                 <i class="menu-icon tf-icons bx bx-bar-chart-alt-2"></i>
                 <div data-i18n="Reports">Reports</div>
             </a>
             <ul class="menu-sub">
-                <li class="menu-item">
+                <li class="menu-item <?= basename($_SERVER['PHP_SELF']) === 'daily.php' ? 'active' : '' ?>">
                     <a href="/panel/modules/reports/daily.php" class="menu-link">
                         <div data-i18n="Daily Report">Daily Report</div>
                     </a>
                 </li>
-                <?php if (canAccess('reports', 'view_recruiter_performance')): ?>
-                <li class="menu-item">
-                    <a href="/panel/modules/reports/recruiter_performance.php" class="menu-link">
-                        <div data-i18n="Recruiter Performance">Recruiter Performance</div>
-                    </a>
-                </li>
-                <?php endif; ?>
-                <?php if (canAccess('reports', 'view_team_performance')): ?>
-                <li class="menu-item">
+                <li class="menu-item <?= basename($_SERVER['PHP_SELF']) === 'pipeline.php' ? 'active' : '' ?>">
                     <a href="/panel/modules/reports/pipeline.php" class="menu-link">
-                        <div data-i18n="Pipeline Analytics">Pipeline Analytics</div>
+                        <div data-i18n="Pipeline">Pipeline Analytics</div>
                     </a>
                 </li>
-                <li class="menu-item">
-                    <a href="/panel/modules/reports/client_health.php" class="menu-link">
-                        <div data-i18n="Client Health">Client Health</div>
+                <li class="menu-item <?= basename($_SERVER['PHP_SELF']) === 'recruiter_performance.php' ? 'active' : '' ?>">
+                    <a href="/panel/modules/reports/recruiter_performance.php" class="menu-link">
+                        <div data-i18n="Performance">Recruiter Performance</div>
                     </a>
                 </li>
-                <?php endif; ?>
-                <?php if (canAccess('reports', 'view_revenue')): ?>
-                <li class="menu-item">
-                    <a href="/panel/modules/reports/revenue.php" class="menu-link">
-                        <div data-i18n="Revenue Report">Revenue Report</div>
+                <li class="menu-item <?= basename($_SERVER['PHP_SELF']) === 'followup.php' ? 'active' : '' ?>">
+                    <a href="/panel/modules/reports/followup.php" class="menu-link">
+                        <div data-i18n="Followup">Follow-up Dashboard</div>
                     </a>
                 </li>
-                <?php endif; ?>
             </ul>
         </li>
         <?php endif; ?>

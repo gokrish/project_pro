@@ -5,7 +5,7 @@
  * 
  * HYBRID VERSION: Supports BOTH old Session-based and new FlashMessage class
  * 
- * @version 5.1 (Backward Compatible)
+ * @version 2.0
  */
 
 use ProConsultancy\Core\Session;

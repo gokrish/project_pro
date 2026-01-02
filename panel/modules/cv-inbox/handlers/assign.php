@@ -1,117 +1,130 @@
 <?php
 /**
- * Assign CV to Recruiter Handler
+ * Assign CV Handler
  * 
- * @version 5.0
+ * @version 2.0
  */
 
 require_once __DIR__ . '/../../_common.php';
 
 use ProConsultancy\Core\Permission;
 use ProConsultancy\Core\Database;
-use ProConsultancy\Core\Auth;
-use ProConsultancy\Core\ApiResponse;
 use ProConsultancy\Core\CSRFToken;
 use ProConsultancy\Core\Logger;
-
-header('Content-Type: application/json');
+use ProConsultancy\Core\Auth;
+use ProConsultancy\Core\ApiResponse;
 
 // Check permission
-if (!Permission::can('cv_inbox', 'assign')) {
-    echo ApiResponse::forbidden();
-    exit;
+if (!Permission::can('cv_inbox', 'edit')) {
+    ApiResponse::forbidden('You do not have permission to assign CVs');
 }
 
-// Verify CSRF
-if (!CSRFToken::verifyRequest()) {
-    echo ApiResponse::error('Invalid CSRF token', 403);
-    exit;
+// Verify CSRF token
+if (!CSRFToken::verify($_POST['csrf_token'] ?? '')) {
+    ApiResponse::error('Invalid security token');
 }
+
+// Validate input
+if (empty($_POST['cv_id'])) {
+    ApiResponse::error('CV ID is required');
+}
+
+if (empty($_POST['assigned_to'])) {
+    ApiResponse::error('Assigned to user is required');
+}
+
+$cvId = (int)$_POST['cv_id'];
+$assignedTo = $_POST['assigned_to'];
+$user = Auth::user();
+
+$db = Database::getInstance();
+$conn = $db->getConnection();
 
 try {
-    $cvId = (int)input('cv_id');
-    $assignTo = input('assign_to');
+    $db->beginTransaction();
     
-    if (!$cvId || empty($assignTo)) {
-        echo ApiResponse::validationError(['assign_to' => 'Recruiter is required']);
-        exit;
-    }
-    
-    $db = Database::getInstance();
-    $conn = $db->getConnection();
-    $user = Auth::user();
-    
-    // Verify CV exists
-    $stmt = $conn->prepare("SELECT * FROM cv_inbox WHERE id = ?");
+    // Get current CV data
+    $stmt = $conn->prepare("
+        SELECT cv_code, applicant_name, assigned_to as current_assignee
+        FROM cv_inbox 
+        WHERE id = ? AND deleted_at IS NULL
+    ");
     $stmt->bind_param("i", $cvId);
     $stmt->execute();
-    $cv = $stmt->get_result()->fetch_assoc();
+    $result = $stmt->get_result();
+    $cv = $result->fetch_assoc();
     
     if (!$cv) {
-        echo ApiResponse::error('CV not found', 404);
-        exit;
+        ApiResponse::notFound('CV not found');
     }
     
-    // Verify recruiter exists
-    $stmt = $conn->prepare("SELECT user_code, name FROM users WHERE user_code = ? AND is_active = 1");
-    $stmt->bind_param("s", $assignTo);
+    // Verify assigned user exists
+    $stmt = $conn->prepare("
+        SELECT user_code, name 
+        FROM users 
+        WHERE user_code = ? AND is_active = 1
+    ");
+    $stmt->bind_param("s", $assignedTo);
     $stmt->execute();
-    $recruiter = $stmt->get_result()->fetch_assoc();
-    Logger::getInstance()->logActivity(
-    'assign',
-    'cv_inbox',
-    $cvId,
-    "Assigned CV to {$recruiter['name']} by " . Auth::userName()  // ADD THIS
-);
-
-    if (!empty($cv['assigned_to']) && $cv['assigned_to'] !== $assignTo) {
-        // Get previous recruiter name
-        $stmt = $conn->prepare("SELECT name FROM users WHERE user_code = ?");
-        $stmt->bind_param("s", $cv['assigned_to']);
-        $stmt->execute();
-        $prevRecruiter = $stmt->get_result()->fetch_assoc();
-        
-        Logger::getInstance()->logActivity(
-            'reassign',
-            'cv_inbox',
-            $cvId,
-            "Reassigned from {$prevRecruiter['name']} to {$recruiter['name']}"
-        );
-    }
-    if (!$recruiter) {
-        echo ApiResponse::error('Invalid recruiter selected', 400);
-        exit;
+    $result = $stmt->get_result();
+    $assignedUser = $result->fetch_assoc();
+    
+    if (!$assignedUser) {
+        ApiResponse::error('Assigned user not found or inactive');
     }
     
     // Update assignment
-    $stmt = $conn->prepare("UPDATE cv_inbox SET assigned_to = ? WHERE id = ?");
-    $stmt->bind_param("si", $assignTo, $cvId);
-    $stmt->execute();
+    $stmt = $conn->prepare("
+        UPDATE cv_inbox 
+        SET assigned_to = ?,
+            assigned_at = NOW(),
+            updated_at = NOW()
+        WHERE id = ?
+    ");
+    
+    $stmt->bind_param("si", $assignedTo, $cvId);
+    
+    if (!$stmt->execute()) {
+        throw new Exception('Failed to update assignment');
+    }
     
     // Log activity
+    $oldAssignee = $cv['current_assignee'] ?? 'Unassigned';
+    
     Logger::getInstance()->logActivity(
-        'assign',
+        'update',
         'cv_inbox',
-        $cvId,
-        "Assigned CV to {$recruiter['name']}"
+        $cv['cv_code'],
+        "Reassigned CV: {$oldAssignee} → {$assignedUser['name']}",
+        [
+            'cv_id' => $cvId,
+            'applicant_name' => $cv['applicant_name'],
+            'old_assignee' => $oldAssignee,
+            'new_assignee' => $assignedTo,
+            'reassigned_by' => $user['user_code']
+        ]
     );
     
-    // Send notification
-    Notification::send(
-        $assignTo,
-        'cv_assigned',
-        'CV Application Assigned',
-        "CV application for {$cv['candidate_name']} has been assigned to you",
-        'cv_inbox',
-        $cvId
-    );
+    $db->commit();
     
-    echo ApiResponse::success(null, 'CV assigned successfully');
+    ApiResponse::success([
+        'cv_id' => $cvId,
+        'cv_code' => $cv['cv_code'],
+        'assigned_to' => $assignedTo,
+        'assigned_to_name' => $assignedUser['name'],
+        'assigned_at' => date('Y-m-d H:i:s')
+    ], 'CV assigned successfully');
     
 } catch (Exception $e) {
-    Logger::getInstance()->error('Assign CV failed', [
-        'error' => $e->getMessage()
+    $db->rollback();
+    
+    Logger::getInstance()->error('Failed to assign CV', [
+        'cv_id' => $cvId,
+        'error' => $e->getMessage(),
+        'trace' => $e->getTraceAsString()
     ]);
     
-    echo ApiResponse::error('Failed to assign CV', 500);
+    ApiResponse::serverError('Failed to assign CV', [
+        'error' => $e->getMessage()
+    ]);
 }

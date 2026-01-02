@@ -50,7 +50,7 @@ try {
     
     // Begin transaction
     $conn->begin_transaction();
-    
+    $user = Auth::user();
     try {
         if ($permanent) {
             // Hard delete (permanent removal)
@@ -77,7 +77,7 @@ try {
                     deleted_at = NOW()
                 WHERE id = ?
             ");
-            $stmt->bind_param("si", Auth::userCode(), $cvId);
+            $stmt->bind_param("si", $user, $cvId);
             $stmt->execute();
             
             $message = 'CV moved to trash';

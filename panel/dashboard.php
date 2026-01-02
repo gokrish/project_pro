@@ -191,7 +191,7 @@ if ($isAdmin && Permission::can('submissions', 'approve')) {
     }
 }
 
-// Get pending job approvals (managers only)
+// Get pending job approvals (admin/managers only)
 $pendingJobs = [];
 if ($isAdmin && Permission::can('jobs', 'approve')) {
     try {
@@ -318,7 +318,7 @@ require_once __DIR__ . '/includes/header.php';
     <!-- Left Column -->
     <div class="col-lg-8">
         
-        <!-- Pending Job Approvals (Managers Only) -->
+        <!-- Pending Job Approvals (Admin/Managers Only) -->
         <?php if ($isAdmin && !empty($pendingJobs)): ?>
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
@@ -355,7 +355,7 @@ require_once __DIR__ . '/includes/header.php';
         </div>
         <?php endif; ?>
         
-        <!-- Pending Submissions (Managers Only) -->
+        <!-- Pending Submissions (Admin/Managers Only) -->
         <?php if ($isAdmin && !empty($pendingSubmissions)): ?>
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
@@ -462,6 +462,11 @@ require_once __DIR__ . '/includes/header.php';
             <div class="card-header">
                 <h5 class="mb-0"><i class="bx bx-bar-chart"></i> Quick Stats</h5>
             </div>
+            <?php if (Permission::can('reports', 'view_dashboard')): ?>
+                <a href="/panel/modules/reports/daily.php" class="btn btn-outline-primary">
+                    <i class="bx bx-bar-chart-alt-2"></i> View Reports
+                </a>
+            <?php endif; ?>
             <div class="card-body">
                 <div class="d-flex justify-content-between mb-3">
                     <span>Placement Rate:</span>

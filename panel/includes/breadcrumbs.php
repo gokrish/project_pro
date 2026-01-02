@@ -3,7 +3,7 @@
  * Breadcrumbs Component
  * Dynamic breadcrumb navigation
  * 
- * @version 5.0
+ * @version 2.0
  */
 
 if (empty($breadcrumbs)) {

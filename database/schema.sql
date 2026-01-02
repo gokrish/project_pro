@@ -30,7 +30,8 @@ DROP TABLE IF EXISTS `candidate_submissions`;
 DROP TABLE IF EXISTS `activity_log`;
 DROP TABLE IF EXISTS `notes`;
 DROP TABLE IF EXISTS `documents`;
-DROP TABLE IF EXISTS `cv_inbox`;
+DROP TABLE IF EXISTS 'cv_notes';
+DROP TABLE IF EXISTS 'cv_inbox';
 DROP TABLE IF EXISTS `contact_documents`;
 DROP TABLE IF EXISTS `contact_notes`;
 DROP TABLE IF EXISTS `contact_tag_map`;
@@ -645,22 +646,103 @@ CREATE TABLE IF NOT EXISTS `contacts` (
     INDEX `idx_assigned` (`assigned_to`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- -- CV Inbox (Submitted CV should link to jobid and jobref id job_refno)
--- CREATE TABLE IF NOT EXISTS `cv_inbox` (
---     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
---     `job_id` INT,
---     `cv_path` VARCHAR(500) NULL,
---     `source` VARCHAR(100), (website)
---     `status` ENUM('new', 'reviewed', 'shortlisted', 'converted', 'rejected') DEFAULT 'new',
---     `notes` TEXT NULL,
---     `reviewed_by` VARCHAR(50) NULL,
---     `reviewed_at` TIMESTAMP NULL,
---     `submitted_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
---     `deleted_at` TIMESTAMP NULL,
---     INDEX `idx_code` (`cv_code`),
---     INDEX `idx_status` (`status`)
--- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- ============================================================================
+-- 5. CV INBOX - Career Page Applications (Linked to Jobs)
+-- ============================================================================
+CREATE TABLE `cv_inbox` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `cv_code` VARCHAR(50) UNIQUE NOT NULL COMMENT 'CV001, CV002, etc.',
+    
+    -- ========== JOB REFERENCE ==========
+    `job_id` INT UNSIGNED NULL COMMENT 'FK to jobs.id',
+    `job_code` VARCHAR(50) NULL COMMENT 'Internal job code',
+    `job_refno` VARCHAR(50) NULL COMMENT 'Public job reference (JOB-2024-001)',
+    
+    -- ========== APPLICANT INFO (RENAMED!) ==========
+    `applicant_name` VARCHAR(255) NOT NULL,
+    `applicant_email` VARCHAR(255) NOT NULL,
+    -- `applicant_phone` VARCHAR(50),
+    
+    -- ========== CV & DOCUMENTS ==========
+    `cv_path` VARCHAR(500) NOT NULL COMMENT 'Path to CV file',
+    `cover_letter_path` VARCHAR(500) COMMENT 'Optional cover letter',
+    
+    -- ========== SOURCE ==========
+    `source` ENUM(
+        'Website_Career_Page',
+        'Email',
+        'LinkedIn',
+        'Referral',
+        'Direct',
+        'Other'
+    ) DEFAULT 'Website_Career_Page',
+    
+    -- ========== STATUS ==========
+    `status` ENUM(
+        'new',          -- Just submitted/added
+        'screening',    -- Being reviewed
+        'shortlisted',  -- Looks promising
+        'converted',    -- Converted to candidate
+        'rejected',     -- Not suitable
+        'spam'          -- Marked as spam
+    ) DEFAULT 'new',
+    
+    -- ========== REVIEW TRACKING ==========
+    `reviewed_by` VARCHAR(50) COMMENT 'user_code',
+    `reviewed_at` TIMESTAMP NULL,
+    `review_notes` TEXT COMMENT 'Screening notes',
+    `rejection_reason` TEXT COMMENT 'Why rejected',
+    `quality_score` TINYINT COMMENT '1-5 rating',
+    
+    -- ========== ASSIGNMENT ==========
+    `assigned_to` VARCHAR(50) COMMENT 'user_code',
+    `assigned_at` TIMESTAMP NULL,
+    
+    -- ========== CONVERSION ==========
+    `converted_to_candidate_code` VARCHAR(50) NULL,
+    `converted_by` VARCHAR(50),
+    `converted_at` TIMESTAMP NULL,
+    
+    -- ========== TIMESTAMPS  ==========
+    `submitted_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `deleted_at` TIMESTAMP NULL,
+    
+    -- ========== FOREIGN KEYS ==========
+    FOREIGN KEY (`job_id`) REFERENCES `jobs`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`converted_to_candidate_code`) REFERENCES `candidates`(`candidate_code`) ON DELETE SET NULL,
+    
+    -- ========== INDEXES ==========
+    INDEX `idx_cv_code` (`cv_code`),
+    INDEX `idx_job_id` (`job_id`),
+    INDEX `idx_job_code` (`job_code`),
+    INDEX `idx_job_refno` (`job_refno`),
+    INDEX `idx_status` (`status`),
+    INDEX `idx_email` (`applicant_email`),
+    INDEX `idx_source` (`source`),
+    INDEX `idx_submitted` (`submitted_at`),
+    INDEX `idx_assigned` (`assigned_to`),
+    INDEX `idx_converted` (`converted_to_candidate_code`)
+    
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='CV Inbox - Website Career Page and email applications';
 
+-- ============================================================================
+-- STEP 4: CREATE CV NOTES TABLE
+-- ============================================================================
+CREATE TABLE `cv_inbox_notes` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `cv_id` INT UNSIGNED NOT NULL,
+    `note_type` ENUM('general', 'screening', 'call', 'email', 'meeting') DEFAULT 'general',
+    `note` TEXT NOT NULL,
+    `created_by` VARCHAR(50),
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (`cv_id`) REFERENCES `cv_inbox`(`id`) ON DELETE CASCADE,
+    INDEX `idx_cv_id` (`cv_id`),
+    INDEX `idx_created` (`created_at`)
+    
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Website Queries
 

@@ -7,8 +7,15 @@ use ProConsultancy\Core\Auth;
 use ProConsultancy\Core\CSRFToken;
 use ProConsultancy\Core\Logger;
 use ProConsultancy\Core\FlashMessage;
+use ProConsultancy\Core\ApiResponse;
 
-Permission::require('candidates', 'edit_status');
+Permission::require('candidates', 'edit');
+
+// Validate transition
+$validTransitions = CANDIDATE_STATUS_TRANSITIONS[$oldStatus] ?? [];
+if (!in_array($newStatus, $validTransitions)) {
+    ApiResponse::error('Invalid status transition', 400);
+}
 
 if (!CSRFToken::verify($_POST['csrf_token'] ?? '')) {
     FlashMessage::error('Invalid security token');

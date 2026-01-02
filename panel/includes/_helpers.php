@@ -3,8 +3,7 @@
  * Helper Functions
  * Common utility functions used throughout the application
  * 
- * @package ProConsultancy
- * @version 3.0
+ * @version 2.0
  */
 
 // ============================================================================

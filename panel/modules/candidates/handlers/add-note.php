@@ -2,7 +2,7 @@
 require_once __DIR__ . '/../../_common.php';
 use ProConsultancy\Core\{Permission, Database, CSRFToken, Logger, ApiResponse, Auth};
 
-Permission::require('candidates', 'add_note');
+Permission::require('candidates', 'edit');
 
 if (!CSRFToken::verify($_POST['csrf_token'] ?? '')) {
     ApiResponse::error('Invalid security token');

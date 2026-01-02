@@ -3,7 +3,7 @@
  * Header Component
  * Top navigation bar with search, notifications, and user menu
  * 
- * @version 5.0
+ * @version 2.0
  * 
  */
 

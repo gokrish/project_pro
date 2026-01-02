@@ -1,9 +1,8 @@
 <?php
 /**
  * Convert CV to Candidate Handler
- * Creates candidate + application + updates CV status
  * 
- * @version 5.0
+ * @version 2.0
  */
 
 require_once __DIR__ . '/../../_common.php';
@@ -13,6 +12,7 @@ use ProConsultancy\Core\Database;
 use ProConsultancy\Core\Validator;
 use ProConsultancy\Core\CSRFToken;
 use ProConsultancy\Core\Logger;
+use ProConsultancy\Core\Auth;
 
 // Check permission
 Permission::require('candidates', 'create');
@@ -38,8 +38,13 @@ try {
         redirectBack('CV ID is required');
     }
     
-    // Get CV details
-    $stmt = $conn->prepare("SELECT * FROM cv_inbox WHERE id = ?");
+    // Get CV details (using NEW field names!)
+    $stmt = $conn->prepare("
+        SELECT cv.*, j.job_code 
+        FROM cv_inbox cv
+        LEFT JOIN jobs j ON cv.job_id = j.id
+        WHERE cv.id = ? AND cv.deleted_at IS NULL
+    ");
     $stmt->bind_param("i", $cvId);
     $stmt->execute();
     $cv = $stmt->get_result()->fetch_assoc();
@@ -51,7 +56,7 @@ try {
     // Check if already converted
     if ($cv['status'] === 'converted') {
         redirectWithMessage(
-            "/panel/modules/candidates/view.php?code={$cv['converted_to_candidate']}",
+            "/panel/modules/candidates/view.php?code={$cv['converted_to_candidate_code']}",
             'This CV has already been converted',
             'info'
         );
@@ -60,204 +65,204 @@ try {
     // Validate input
     $validator = new Validator($_POST);
     if (!$validator->validate([
-        'candidate_code' => 'required',
         'candidate_name' => 'required|min:2',
-        'email' => 'required|email'
+        'lead_type' => 'required'
     ])) {
         redirectBack(reset($validator->errors())[0] ?? 'Validation failed');
     }
     
     $data = $validator->validated();
     
+    // Generate candidate code
+    $candidateCode = 'CAN' . date('Ymd') . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
+    
     // Check if candidate code already exists
     $stmt = $conn->prepare("SELECT candidate_code FROM candidates WHERE candidate_code = ?");
-    $stmt->bind_param("s", $data['candidate_code']);
+    $stmt->bind_param("s", $candidateCode);
     $stmt->execute();
     if ($stmt->get_result()->num_rows > 0) {
-        // Regenerate unique code
-        $data['candidate_code'] = 'CAN-' . date('Ymd-His') . '-' . rand(100, 999);
+        $candidateCode = 'CAN' . date('YmdHis') . rand(100, 999);
     }
     
-    // Check if email already exists in candidates
-    $stmt = $conn->prepare("SELECT candidate_code FROM candidates WHERE email = ?");
+    // Check if email already exists
+    $stmt = $conn->prepare("SELECT candidate_code FROM candidates WHERE email = ? AND deleted_at IS NULL");
     $stmt->bind_param("s", $data['email']);
     $stmt->execute();
     $existingCandidate = $stmt->get_result()->fetch_assoc();
     
     if ($existingCandidate) {
-        // Email exists - link to existing candidate instead of creating new
-        $data['candidate_code'] = $existingCandidate['candidate_code'];
+        // Email exists - link to existing candidate
+        $candidateCode = $existingCandidate['candidate_code'];
         $isNewCandidate = false;
     } else {
         $isNewCandidate = true;
     }
     
     // Get optional fields
-    $phone = input('phone', '');
+    $phone = input('phone', '' );
+    $phoneAlternate = input('phone_alternate', '');
+    $linkedinUrl = input('linkedin_url', $cv['applicant_linkedin']);
+    
+    // Location & Work Status
+    $currentLocation = input('current_location', 'Belgium');
+    $willingToJoin = isset($_POST['willing_to_join']) ? 1 : 0;
+    $workAuthorizationId = !empty(input('work_authorization_id')) ? (int)input('work_authorization_id') : null;
+    
+    // Employment
+    $currentEmployer = input('current_employer', '');
     $currentPosition = input('current_position', '');
-    $currentCompany = input('current_company', '');
-    $totalExperience = !empty(input('total_experience')) ? (float)input('total_experience') : null;
-    $currentLocation = input('current_location', '');
-    $skills = input('skills', '');
-    $expectedCompensation = !empty(input('expected_compensation')) ? (float)input('expected_compensation') : null;
-    $availability = input('availability', '');
-    $workAuthorization = input('work_authorization', '');
-    $leadType = input('lead_type', 'warm');
-    $jobCode = input('job_code', '');
-    $applicationStatus = input('application_status', 'screening');
-    $notes = input('notes', '');
-    $sendWelcomeEmail = isset($_POST['send_welcome_email']) ? 1 : 0;
+    $currentWorkingStatus = input('current_working_status', '');
+    
+    // Compensation
+    $expectedSalary = !empty(input('expected_salary')) ? (float)input('expected_salary') : null;
+    $expectedDailyRate = !empty(input('expected_daily_rate')) ? (float)input('expected_daily_rate') : null;
+    
+    // Availability
+    $noticePeriodDays = !empty(input('notice_period_days')) ? (int)input('notice_period_days') : null;
+    $availableFrom = input('available_from', '') ?: null;
+    
+    // BUSINESS FIELDS - CRITICAL!
+    $leadType = $data['lead_type'];
+    $leadTypeRole = input('lead_type_role', '');
+    
+    // Status
+    $initialStatus = input('initial_status', 'qualified');
+    
+    // Skills (simplified - array of skill IDs)
+    $skills = input('skills', []);
+    
+    // Notes
+    $internalNotes = input('internal_notes', '');
+    
+    // Auto-submit to job?
+    $autoSubmit = (int)input('auto_submit', 0);
     
     // Begin transaction
     $conn->begin_transaction();
     
     try {
-        // STEP 1: Create or Update Candidate
+        // STEP 1: Create or update candidate
         if ($isNewCandidate) {
             $sql = "
                 INSERT INTO candidates (
-                    candidate_code, candidate_name, email, phone,
-                    current_position, current_company, total_experience,
-                    current_location, skills,
-                    expected_compensation, compensation_type,
-                    availability, work_authorization, lead_type,
-                    status, source,
-                    created_by, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'daily_rate', ?, ?, ?, 'active', ?, ?, NOW())
+                    candidate_code, candidate_name, email, phone, phone_alternate,
+                    linkedin_url, current_location, willing_to_join, work_authorization_id,
+                    current_employer, current_position, current_working_status,
+                    expected_salary, expected_daily_rate,
+                    notice_period_days, available_from,
+                    lead_type, lead_type_role,
+                    status, screening_result,
+                    candidate_cv, assigned_to, created_by,
+                    internal_notes,
+                    created_at, updated_at
+                ) VALUES (
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?,
+                    ?, ?,
+                    ?,
+                    ?, ?,
+                    ?, 'pending',
+                    ?, ?, ?,
+                    ?,
+                    NOW(), NOW()
+                )
             ";
             
             $stmt = $conn->prepare($sql);
-            $source = 'cv_inbox'; // Mark source
-            
             $stmt->bind_param(
-                "ssssssdssdssss",
-                $data['candidate_code'],
+                "ssssssssisssddissssssss",
+                $candidateCode,
                 $data['candidate_name'],
                 $data['email'],
                 $phone,
-                $currentPosition,
-                $currentCompany,
-                $totalExperience,
+                $phoneAlternate,
+                $linkedinUrl,
                 $currentLocation,
-                $skills,
-                $expectedCompensation,
-                $availability,
-                $workAuthorization,
+                $willingToJoin,
+                $workAuthorizationId,
+                $currentEmployer,
+                $currentPosition,
+                $currentWorkingStatus,
+                $expectedSalary,
+                $expectedDailyRate,
+                $noticePeriodDays,
+                $availableFrom,
                 $leadType,
-                $source,
-                $user['user_code']
+                $leadTypeRole,
+                $initialStatus,
+                $cv['cv_path'],
+                $user['user_code'],
+                $user['user_code'],
+                $internalNotes
             );
             
             if (!$stmt->execute()) {
                 throw new Exception('Failed to create candidate: ' . $stmt->error);
             }
             
+            // STEP 2: Add skills (simplified - no proficiency in form)
+            if (!empty($skills) && is_array($skills)) {
+                $stmt = $conn->prepare("
+                    INSERT INTO candidate_skills (
+                        candidate_code, skill_id, proficiency_level, is_primary, added_by, added_at
+                    ) VALUES (?, ?, 'Intermediate', ?, ?, NOW())
+                ");
+                
+                foreach ($skills as $index => $skillId) {
+                    $skillId = (int)$skillId;
+                    $isPrimary = ($index === 0) ? 1 : 0;
+                    
+                    $stmt->bind_param("siis", $candidateCode, $skillId, $isPrimary, $user['user_code']);
+                    $stmt->execute();
+                }
+            }
+            
             Logger::getInstance()->logActivity(
                 'create',
                 'candidates',
-                $data['candidate_code'],
-                "Created candidate from CV inbox: {$data['candidate_name']}"
+                $candidateCode,
+                "Created candidate from CV inbox: {$data['candidate_name']}",
+                ['cv_id' => $cvId, 'cv_code' => $cv['cv_code']]
             );
         }
         
-        // STEP 2: Copy Resume to Candidate Documents
-        if (!empty($cv['resume_path'])) {
+        // STEP 3: Create submission if auto-submit enabled
+        if ($autoSubmit && !empty($cv['job_code'])) {
+            $submissionCode = 'SUB' . date('Ymd') . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
+            
             $stmt = $conn->prepare("
-                INSERT INTO candidate_documents (
-                    candidate_code, document_type, 
-                    file_path, file_name,
-                    uploaded_by, uploaded_at
-                ) VALUES (?, 'resume', ?, ?, ?, NOW())
+                INSERT INTO submissions (
+                    submission_code, candidate_code, job_code,
+                    submitted_by, internal_status, client_status,
+                    submission_notes, created_at
+                ) VALUES (?, ?, ?, ?, 'pending', 'not_sent', 'Converted from CV inbox', NOW())
             ");
             
-            $fileName = basename($cv['resume_path']);
-            
-            $stmt->bind_param(
-                "ssss",
-                $data['candidate_code'],
-                $cv['resume_path'],
-                $fileName,
-                $user['user_code']
-            );
-            
-            $stmt->execute(); // Don't fail if table doesn't exist
-        }
-        
-        // STEP 3: Create Application (if job selected)
-        if (!empty($jobCode)) {
-            // Check if application already exists
-            $stmt = $conn->prepare("
-                SELECT id FROM applications 
-                WHERE candidate_code = ? AND job_code = ?
-            ");
-            $stmt->bind_param("ss", $data['candidate_code'], $jobCode);
+            $stmt->bind_param("ssss", $submissionCode, $candidateCode, $cv['job_code'], $user['user_code']);
             $stmt->execute();
             
-            if ($stmt->get_result()->num_rows === 0) {
-                // Create new application
-                $applicationCode = 'APP-' . date('Ymd') . '-' . str_pad(rand(1, 9999), 4, '0', STR_PAD_LEFT);
-                
-                $stmt = $conn->prepare("
-                    INSERT INTO applications (
-                        application_code, candidate_code, job_code,
-                        status, source, cv_inbox_id,
-                        applied_at, created_by
-                    ) VALUES (?, ?, ?, ?, 'cv_inbox', ?, NOW(), ?)
-                ");
-                
-                $stmt->bind_param(
-                    "ssssis",
-                    $applicationCode,
-                    $data['candidate_code'],
-                    $jobCode,
-                    $applicationStatus,
-                    $cvId,
-                    $user['user_code']
-                );
-                
-                if (!$stmt->execute()) {
-                    throw new Exception('Failed to create application: ' . $stmt->error);
-                }
-                
-                Logger::getInstance()->logActivity(
-                    'create',
-                    'applications',
-                    $applicationCode,
-                    "Created application from CV inbox"
-                );
-            }
-        }
-        
-        // STEP 4: Add Initial Note (if provided)
-        if (!empty($notes)) {
-            $stmt = $conn->prepare("
-                INSERT INTO candidate_notes (
-                    candidate_code, note_type, note,
-                    created_by, created_at
-                ) VALUES (?, 'screening', ?, ?, NOW())
-            ");
-            
-            $stmt->bind_param(
-                "sss",
-                $data['candidate_code'],
-                $notes,
-                $user['user_code']
+            Logger::getInstance()->logActivity(
+                'create',
+                'submissions',
+                $submissionCode,
+                "Auto-created submission from CV conversion"
             );
-            
-            $stmt->execute();
         }
         
-        // STEP 5: Update CV Inbox Status
+        // STEP 4: Update CV inbox status
         $stmt = $conn->prepare("
             UPDATE cv_inbox 
             SET status = 'converted',
-                converted_to_candidate = ?,
+                converted_to_candidate_code = ?,
                 converted_by = ?,
-                converted_at = NOW()
+                converted_at = NOW(),
+                updated_at = NOW()
             WHERE id = ?
         ");
         
-        $stmt->bind_param("ssi", $data['candidate_code'], $user['user_code'], $cvId);
+        $stmt->bind_param("ssi", $candidateCode, $user['user_code'], $cvId);
         
         if (!$stmt->execute()) {
             throw new Exception('Failed to update CV status: ' . $stmt->error);
@@ -266,20 +271,9 @@ try {
         // Commit transaction
         $conn->commit();
         
-        // STEP 6: Send Welcome Email (optional)
-        if ($sendWelcomeEmail && defined('ENABLE_EMAIL_NOTIFICATIONS') && ENABLE_EMAIL_NOTIFICATIONS) {
-            try {
-                // Send welcome email logic here
-                // $mailer->sendWelcomeEmail($data['email'], $data['candidate_name']);
-            } catch (Exception $e) {
-                // Don't fail if email fails
-                Logger::getInstance()->warning('Welcome email failed', ['error' => $e->getMessage()]);
-            }
-        }
-        
-        // Success - redirect to candidate profile
+        // Success redirect
         redirectWithMessage(
-            "/panel/modules/candidates/view.php?code={$data['candidate_code']}",
+            "/panel/modules/candidates/view.php?code={$candidateCode}",
             'CV converted to candidate successfully!',
             'success'
         );
@@ -292,7 +286,8 @@ try {
 } catch (Exception $e) {
     Logger::getInstance()->error('CV conversion failed', [
         'error' => $e->getMessage(),
-        'cv_id' => $cvId ?? null
+        'cv_id' => $cvId ?? null,
+        'trace' => $e->getTraceAsString()
     ]);
     
     redirectBack('Failed to convert CV: ' . $e->getMessage());

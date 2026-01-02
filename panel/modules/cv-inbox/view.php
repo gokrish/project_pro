@@ -31,7 +31,7 @@ if (!$id) {
 $stmt = $conn->prepare("
     SELECT cv.*, j.job_title, j.job_code,
            u.name as assigned_to_name,
-           c.candidate_code, c.candidate_name as converted_candidate
+           c.candidate_code, c.applicant_name as converted_candidate
     FROM cv_inbox cv
     LEFT JOIN jobs j ON cv.job_code = j.job_code
     LEFT JOIN users u ON cv.assigned_to = u.user_code
@@ -67,13 +67,13 @@ if ($cv['status'] === 'new') {
 }
 
 // Log view activity
-Logger::getInstance()->logActivity('view', 'cv_inbox', $id, "Viewed CV application: {$cv['candidate_name']}");
+Logger::getInstance()->logActivity('view', 'cv_inbox', $id, "Viewed CV application: {$cv['applicant_name']}");
 
 // Page configuration
-$pageTitle = 'CV - ' . $cv['candidate_name'];
+$pageTitle = 'CV - ' . $cv['applicant_name'];
 $breadcrumbs = [
     ['title' => 'CV Inbox', 'url' => '/panel/modules/cv-inbox/index.php'],
-    ['title' => $cv['candidate_name'], 'url' => '']
+    ['title' => $cv['applicant_name'], 'url' => '']
 ];
 $customJS = ['/panel/assets/js/modules/cv-view.js'];
 
@@ -86,7 +86,7 @@ require_once __DIR__ . '/../../includes/header.php';
         <div class="d-flex justify-content-between align-items-center">
             <div>
                 <h4 class="fw-bold mb-1">
-                    <?= htmlspecialchars($cv['candidate_name']) ?>
+                    <?= htmlspecialchars($cv['applicant_name']) ?>
                 </h4>
                 <div class="d-flex gap-2 align-items-center">
                     <?php
@@ -364,7 +364,7 @@ require_once __DIR__ . '/../../includes/header.php';
 <!-- Hidden data for JavaScript -->
 <div id="cvData" 
      data-id="<?= $id ?>" 
-     data-name="<?= htmlspecialchars($cv['candidate_name']) ?>"
+     data-name="<?= htmlspecialchars($cv['applicant_name']) ?>"
      style="display: none;"></div>
 
 <?php require_once __DIR__ . '/../../includes/footer.php'; ?>

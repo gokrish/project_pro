@@ -3,7 +3,7 @@
  * Maintenance Mode Page
  * Shown when system is under maintenance
  * 
- * @version 5.0
+ * @version 2.0
  * 
  * USAGE:
  * 1. Set MAINTENANCE_MODE = true in config

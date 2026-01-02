@@ -55,11 +55,10 @@ define('MODULE_PERMISSIONS', [
     // Dashboard & Reports
     'reports' => [
         'view_dashboard',
-        'view_reports',
-        'view_analytics',
-        'export_reports'
+        'view_own',
+        'view_all',
+        'export'
     ],
-    
     // Contacts Module
     'contacts' => [
         'view_all',
@@ -234,30 +233,56 @@ define('PRIORITIES', [
 // ============================================================================
 // CANDIDATE STATUSES
 // ============================================================================
+define('CANDIDATE_STATUS_NEW', 'new');
+define('CANDIDATE_STATUS_SCREENING', 'screening');
+define('CANDIDATE_STATUS_QUALIFIED', 'qualified');
 define('CANDIDATE_STATUS_ACTIVE', 'active');
-define('CANDIDATE_STATUS_INACTIVE', 'inactive');
 define('CANDIDATE_STATUS_PLACED', 'placed');
-define('CANDIDATE_STATUS_BLACKLISTED', 'blacklisted');
+define('CANDIDATE_STATUS_REJECTED', 'rejected');
+define('CANDIDATE_STATUS_ARCHIVED', 'archived');
 
 define('CANDIDATE_STATUSES', [
+    CANDIDATE_STATUS_NEW => 'New',
+    CANDIDATE_STATUS_SCREENING => 'Screening',
+    CANDIDATE_STATUS_QUALIFIED => 'Qualified',
     CANDIDATE_STATUS_ACTIVE => 'Active',
-    CANDIDATE_STATUS_INACTIVE => 'Inactive',
     CANDIDATE_STATUS_PLACED => 'Placed',
-    CANDIDATE_STATUS_BLACKLISTED => 'Blacklisted'
+    CANDIDATE_STATUS_REJECTED => 'Rejected',
+    CANDIDATE_STATUS_ARCHIVED => 'Archived'
 ]);
 
-// ============================================================================
-// CANDIDATE LEAD TYPES
-// ============================================================================
-define('LEAD_TYPE_HOT', 'hot');
-define('LEAD_TYPE_WARM', 'warm');
-define('LEAD_TYPE_COLD', 'cold');
+// Status workflow transitions
+define('CANDIDATE_STATUS_TRANSITIONS', [
+    'new' => ['screening', 'rejected', 'archived'],
+    'screening' => ['qualified', 'rejected', 'archived'],
+    'qualified' => ['active', 'archived'],
+    'active' => ['placed', 'qualified', 'archived'],
+    'placed' => ['archived'],
+    'rejected' => ['archived'],
+    'archived' => ['new']  // Can reactivate
+]);
+
+// Lead types (separate from status)
+define('LEAD_TYPE_HOT', 'Hot');
+define('LEAD_TYPE_WARM', 'Warm');
+define('LEAD_TYPE_COLD', 'Cold');
+define('LEAD_TYPE_BLACKLIST', 'Blacklist');
 
 define('LEAD_TYPES', [
-    LEAD_TYPE_HOT => 'Hot Lead',
-    LEAD_TYPE_WARM => 'Warm Lead',
-    LEAD_TYPE_COLD => 'Cold Lead'
+    LEAD_TYPE_HOT => 'Hot',
+    LEAD_TYPE_WARM => 'Warm',
+    LEAD_TYPE_COLD => 'Cold',
+    LEAD_TYPE_BLACKLIST => 'Blacklist'
 ]);
+
+// Lead type roles
+define('LEAD_TYPE_ROLES', [
+    'Payroll' => 'Payroll',
+    'Recruitment' => 'Recruitment',
+    'InProgress' => 'In Progress',
+    'WaitingConfirmation' => 'Waiting Confirmation'
+]);
+
 
 // ============================================================================
 // JOB STATUSES
@@ -316,26 +341,6 @@ define('SUBMISSION_STATUSES', [
     SUBMISSION_STATUS_WITHDRAWN => 'Withdrawn'
 ]);
 
-// ============================================================================
-// APPLICATION STATUSES
-// ============================================================================
-define('APPLICATION_STATUS_NEW', 'new');
-define('APPLICATION_STATUS_SCREENING', 'screening');
-define('APPLICATION_STATUS_INTERVIEWING', 'interviewing');
-define('APPLICATION_STATUS_OFFERED', 'offered');
-define('APPLICATION_STATUS_PLACED', 'placed');
-define('APPLICATION_STATUS_REJECTED', 'rejected');
-define('APPLICATION_STATUS_WITHDRAWN', 'withdrawn');
-
-define('APPLICATION_STATUSES', [
-    APPLICATION_STATUS_NEW => 'New',
-    APPLICATION_STATUS_SCREENING => 'Screening',
-    APPLICATION_STATUS_INTERVIEWING => 'Interviewing',
-    APPLICATION_STATUS_OFFERED => 'Offered',
-    APPLICATION_STATUS_PLACED => 'Placed',
-    APPLICATION_STATUS_REJECTED => 'Rejected',
-    APPLICATION_STATUS_WITHDRAWN => 'Withdrawn'
-]);
 
 // ============================================================================
 // INTERVIEW STATUSES

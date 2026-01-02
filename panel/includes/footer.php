@@ -3,7 +3,7 @@
  * Footer Component
  * Closes content wrapper and loads JavaScript
  * 
- * @version 5.0
+ * @version 2.0
  */
 ?>
                     </div>

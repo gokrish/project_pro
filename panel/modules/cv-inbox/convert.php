@@ -28,7 +28,7 @@ if (!$cvId) {
 
 // Get CV details
 $stmt = $conn->prepare("
-    SELECT cv.*, j.job_title, j.job_code
+    SELECT cv.*, j.job_code
     FROM cv_inbox cv
     LEFT JOIN jobs j ON cv.job_code = j.job_code
     WHERE cv.id = ?
@@ -77,10 +77,10 @@ if ($existingCandidate) {
     echo '</div>';
 }
 // Page configuration
-$pageTitle = 'Convert to Candidate - ' . $cv['candidate_name'];
+$pageTitle = 'Convert to Candidate - ' . $cv['applicant_name'];
 $breadcrumbs = [
     ['title' => 'CV Inbox', 'url' => '/panel/modules/cv-inbox/index.php'],
-    ['title' => $cv['candidate_name'], 'url' => '/panel/modules/cv-inbox/view.php?id=' . $cvId],
+    ['title' => $cv['applicant_name'], 'url' => '/panel/modules/cv-inbox/view.php?id=' . $cvId],
     ['title' => 'Convert', 'url' => '']
 ];
 
@@ -100,7 +100,7 @@ require_once __DIR__ . '/../../includes/header.php';
             <div class="card-body">
                 <div class="alert alert-info">
                     <i class="bx bx-info-circle me-2"></i>
-                    <strong>Converting Application:</strong> <?= htmlspecialchars($cv['candidate_name']) ?>
+                    <strong>Converting Application:</strong> <?= htmlspecialchars($cv['applicant_name']) ?>
                     <br>This will create a new candidate record and optionally link to the job application.
                 </div>
                 
@@ -128,7 +128,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <input type="text" 
                                        name="candidate_name" 
                                        class="form-control" 
-                                       value="<?= htmlspecialchars($cv['candidate_name']) ?>" 
+                                       value="<?= htmlspecialchars($cv['applicant_name']) ?>" 
                                        required>
                             </div>
                             
