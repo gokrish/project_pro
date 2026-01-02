@@ -5,9 +5,6 @@
  * 
  * This tab shows:
  * 1. Which clients this candidate was submitted to (Submissions module)
- * 2. Job applications and their status (Applications module)
- * 3. Interview feedback and ratings (Applications module)
- * 4. Placement history (Applications module)
  */
 ?>
 

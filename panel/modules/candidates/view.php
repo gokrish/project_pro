@@ -5,13 +5,13 @@
 *
 * Features:
 * - SQL injection protection (100% prepared statements)
-* - Job activity tracking (submissions, applications, interviews)
+* - Job activity tracking (submissions)
 * - HR comments & notes
 * - Document preview (in-page PDF/image viewer)
 * - Activity timeline
 * - Permission-based access
 *
-* @version 5.0
+* @version 2.0
 */
 require_once __DIR__ . '/../_common.php';
 use ProConsultancy\Core\Auth;
@@ -19,6 +19,28 @@ use ProConsultancy\Core\Database;
 use ProConsultancy\Core\Permission;
 use ProConsultancy\Core\Logger;
 use ProConsultancy\Core\CSRFToken;
+function getInternalStatusColor($status) {
+    return match($status) {
+        'pending' => 'warning',
+        'approved' => 'success',
+        'rejected' => 'danger',
+        'withdrawn' => 'secondary',
+        default => 'info'
+    };
+}
+
+function getClientStatusColor($status) {
+    return match($status) {
+        'not_sent' => 'secondary',
+        'submitted' => 'info',
+        'interviewing' => 'primary',
+        'offered' => 'success',
+        'placed' => 'success',
+        'rejected' => 'danger',
+        'withdrawn' => 'secondary',
+        default => 'info'
+    };
+}
 
 // Check permission - SQL injection safe (no user input here)
 if (!Permission::can('candidates', 'view_all') && !Permission::can('candidates', 'view_own')) {
@@ -68,117 +90,29 @@ $stmt = $conn->prepare("
     SELECT
         s.submission_code,
         s.job_code,
-        s.client_code,
-        s.status,
-        s.submitted_at,
-        s.reviewed_at,
-        s.review_notes,
-        s.fit_reason,
+        s.candidate_code,
+        s.internal_status,
+        s.client_status,
+        s.submission_notes,
+        s.created_at as submitted_at,
+        s.approved_at as reviewed_at,
+        s.approval_notes as review_notes,
         j.job_title,
         j.location as job_location,
         c.company_name as client_name,
         u1.name as submitted_by_name,
-        u2.name as reviewed_by_name
-    FROM candidate_submissions s
+        u2.name as approved_by_name
+    FROM submissions s  -- ✅ CORRECT TABLE
     LEFT JOIN jobs j ON s.job_code = j.job_code
-    LEFT JOIN clients c ON s.client_code = c.client_code
+    LEFT JOIN clients c ON j.client_code = c.client_code
     LEFT JOIN users u1 ON s.submitted_by = u1.user_code
-    LEFT JOIN users u2 ON s.reviewed_by = u2.user_code
+    LEFT JOIN users u2 ON s.approved_by = u2.user_code
     WHERE s.candidate_code = ?
     AND s.deleted_at IS NULL
-    ORDER BY s.submitted_at DESC
+    ORDER BY s.created_at DESC
 ");
-$stmt->bind_param("s", $candidateCode);
-$stmt->execute();
-$submissions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
-// ============================================================================
-// GET APPLICATIONS DATA - SQL INJECTION SAFE
-// ============================================================================
-$stmt = $conn->prepare("
-    SELECT
-        a.application_id,
-        a.job_code,
-        a.submission_id,
-        a.status,
-        a.application_date,
-        a.current_stage_since,
-        a.interview_count,
-        a.rejection_reason,
-        j.job_title,
-        j.location as job_location,
-        j.salary_min,
-        j.salary_max,
-        c.company_name as client_name,
-        c.client_code
-    FROM job_applications a
-    LEFT JOIN jobs j ON a.job_code = j.job_code
-    LEFT JOIN clients c ON j.client_code = c.client_code
-    WHERE a.candidate_code = ?
-    AND a.deleted_at IS NULL
-    ORDER BY a.application_date DESC
-");
-$stmt->bind_param("s", $candidateCode);
-$stmt->execute();
-$applications = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
-// ============================================================================
-// GET INTERVIEWS DATA - SQL INJECTION SAFE
-// ============================================================================
-$stmt = $conn->prepare("
-    SELECT
-        i.interview_id,
-        i.application_id,
-        i.interview_round,
-        i.interview_date,
-        i.interview_type,
-        i.interviewer_name,
-        i.interviewer_email,
-        i.feedback,
-        i.rating,
-        i.recommendation,
-        i.created_at,
-        j.job_title,
-        c.company_name as client_name
-    FROM application_interviews i
-    JOIN job_applications a ON i.application_id = a.application_id
-    JOIN jobs j ON a.job_code = j.job_code
-    LEFT JOIN clients c ON j.client_code = c.client_code
-    WHERE a.candidate_code = ?
-    ORDER BY i.interview_date DESC
-");
-$stmt->bind_param("s", $candidateCode);
-$stmt->execute();
-$interviews = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-
-// ============================================================================
-// GET PLACEMENTS DATA - SQL INJECTION SAFE
-// ============================================================================
-$stmt = $conn->prepare("
-    SELECT
-        p.placement_id,
-        p.application_id,
-        p.placement_date,
-        p.start_date,
-        p.contract_type,
-        p.annual_salary,
-        p.placement_fee,
-        p.probation_period_months,
-        p.status,
-        p.client_feedback,
-        p.client_rating,
-        j.job_title,
-        c.company_name as client_name
-    FROM application_placements p
-    JOIN job_applications a ON p.application_id = a.application_id
-    JOIN jobs j ON a.job_code = j.job_code
-    LEFT JOIN clients c ON j.client_code = c.client_code
-    WHERE a.candidate_code = ?
-    ORDER BY p.placement_date DESC
-");
-$stmt->bind_param("s", $candidateCode);
-$stmt->execute();
-$placements = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
 // ============================================================================
 // GET DOCUMENTS - SQL INJECTION SAFE
@@ -542,7 +476,7 @@ require_once __DIR__ . '/../../includes/header.php';
                 <?php include __DIR__ . '/components/tab-professional.php'; ?>
             </div>
             <!-- ================================================================ -->
-            <!-- TAB 3: JOB ACTIVITY (Submissions + Applications + Interviews + Placements) -->
+            <!-- TAB 3: JOB ACTIVITY (Submissions + Interviews + Placements) -->
             <!-- ================================================================ -->
             <div class="tab-pane fade" id="job-activity" role="tabpanel">
                 <?php include __DIR__ . '/components/tab-job-activity.php'; ?>
@@ -674,11 +608,7 @@ require_once __DIR__ . '/../../includes/header.php';
                 <div class="card-header">
                     <h5 class="mb-0"><i class="bx bx-stats me-1"></i> Activity Summary</h5>
                 </div>
-                <div class="card-body">
-                    <div class="d-flex justify-content-between mb-3">
-                        <small>Applications</small>
-                        <span class="badge bg-primary"><?= count($applications) ?></span>
-                    </div>
+
                     <div class="progress mb-3" style="height: 6px;">
                         <div class="progress-bar" role="progressbar" style="width: <?= min(100, count($applications) * 25) ?>%"></div>
                     </div>

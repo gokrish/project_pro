@@ -4,11 +4,6 @@
  * 
  * @version 2.0
  */
-// Add at top of dashboard.php temporarily:
-var_dump(Auth::check());
-var_dump(Auth::user());
-var_dump($_SESSION);
-die();
 
 require_once __DIR__ . '/modules/_common.php';
 
@@ -17,19 +12,6 @@ use ProConsultancy\Core\Logger;
 use ProConsultancy\Core\Auth;
 use ProConsultancy\Core\Database;
 use ProConsultancy\Core\Permission;
-
-/**
- * HARD LOOP BREAKER
- */
-if (Session::get('_login_fresh') === true) {
-    Session::remove('_login_fresh');
-    // Allow dashboard to load ONCE without auth redirect
-} else {
-    if (!Auth::check()) {
-        header('Location: /panel/login.php');
-        exit;
-    }
-}
 
 
 

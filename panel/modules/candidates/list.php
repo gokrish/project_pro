@@ -154,7 +154,7 @@ $candidates = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 // Get recruiters for assignment
 $recruiters = [];
 if (Permission::can('candidates', 'assign')) {
-    $stmt = $conn->prepare("SELECT user_code, name FROM users WHERE level IN ('recruiter', 'manager', 'admin') AND is_active = 1 ORDER BY name");
+    $stmt = $conn->prepare("SELECT user_code, name FROM users WHERE level IN ('recruiter', 'manager', 'admin','user') AND is_active = 1 ORDER BY name");
     $stmt->execute();
     $recruiters = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 }

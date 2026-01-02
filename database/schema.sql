@@ -271,7 +271,7 @@ CREATE TABLE `users` (
 
     -- Create index on user_code (if not exists)
     CREATE INDEX IF NOT EXISTS idx_users_user_code ON users(user_code);
-    
+
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- User sessions (remember me)
@@ -866,6 +866,27 @@ CREATE TABLE `submission_status_history` (
     INDEX `idx_changed_at` (`changed_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE `interviews` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `submission_code` VARCHAR(50) NOT NULL,
+    `interview_date` DATETIME NOT NULL,
+    `interview_type` ENUM('phone', 'video', 'in-person') DEFAULT 'phone',
+    `feedback` TEXT,
+    `status` ENUM('scheduled', 'completed', 'cancelled') DEFAULT 'scheduled',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`submission_code`) REFERENCES `submissions`(`submission_code`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `offers` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `offer_code` VARCHAR(50) UNIQUE NOT NULL,
+    `submission_code` VARCHAR(50) NOT NULL,
+    `status` ENUM('draft', 'sent', 'accepted', 'rejected', 'expired') DEFAULT 'draft',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`submission_code`) REFERENCES `submissions`(`submission_code`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 -- ============================================================================
 -- SECTION 6: SYSTEM TABLES
 -- ============================================================================
