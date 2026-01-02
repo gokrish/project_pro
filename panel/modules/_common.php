@@ -55,6 +55,14 @@ spl_autoload_register(function ($class) {
 });
 
 // ============================================================================
+// 🔥 LOAD ERROR HANDLER FIRST (BEFORE CONFIG)
+// ============================================================================
+// This ensures ALL errors are caught, even config errors
+require_once INCLUDES_PATH . '/Core/ErrorHandler.php';
+use ProConsultancy\Core\ErrorHandler;
+// Note: ErrorHandler auto-registers on include (see line 287)
+
+// ============================================================================
 // LOAD CONFIGURATION (this defines DEV_MODE constants)
 // ============================================================================
 require_once INCLUDES_PATH . '/config/config.php';
@@ -224,7 +232,7 @@ if (defined('DEV_MODE') && DEV_MODE === true && isset($_SESSION['dev_mode']) && 
                     <strong>Level:</strong> <span style="background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 3px; font-size: 11px;">' . htmlspecialchars($userLevel) . '</span>
                 </div>
                 <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.3); font-size: 11px; opacity: 0.85;">
-                    Token-based authentication active
+                    Error Handler Active ✅
                 </div>
             </div>';
         });
@@ -300,7 +308,7 @@ function formatDateTime($datetime, $format = DATETIME_FORMAT): string {
 }
 
 /**
- * Sanitize output
+ * Sanitize output (XSS protection)
  */
 function e($string): string {
     return htmlspecialchars($string ?? '', ENT_QUOTES, 'UTF-8');

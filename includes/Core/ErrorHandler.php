@@ -86,7 +86,11 @@ class ErrorHandler {
             'message' => $exception->getMessage(),
             'file' => $exception->getFile(),
             'line' => $exception->getLine(),
-            'trace' => $exception->getTraceAsString()
+            'trace' => $exception->getTraceAsString(),
+            'url' => $_SERVER['REQUEST_URI'] ?? 'unknown',
+            'method' => $_SERVER['REQUEST_METHOD'] ?? 'unknown',
+            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? 'unknown',
+            'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown'
         ]);
         
         // Show error page

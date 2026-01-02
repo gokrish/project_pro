@@ -16,7 +16,8 @@ return [
     'app_debug' => true,
     'app_url' => 'http://proconsultancy.test',
     'app_timezone' => 'Europe/Brussels',
-    
+    'log_level' => 'debug',  // debug, info, warning, error, critical
+    'log_file' => ROOT_PATH . '/logs/app.log',
     // ============================================================================
     // DEVELOPMENT MODE (for testing without login)
     // ============================================================================
