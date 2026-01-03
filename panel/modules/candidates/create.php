@@ -70,7 +70,7 @@ require_once __DIR__ . '/../../includes/header.php';
                     <!-- Candidate Name -->
                     <div class="col-md-6">
                         <label class="form-label">
-                            Full Name <span class="text-danger">*</span>
+                            Candidate Name <span class="text-danger">*</span>
                         </label>
                         <input type="text" class="form-control" name="candidate_name" required 
                                placeholder="John Doe">

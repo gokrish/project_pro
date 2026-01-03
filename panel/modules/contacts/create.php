@@ -92,22 +92,15 @@ require_once __DIR__ . '/../../includes/header.php';
                 Basic Information
             </h5>
             
-            <div class="row g-3">
+                    <!-- Candidate Name -->
                 <div class="col-md-6">
-                    <label for="first_name" class="form-label">
-                        First Name <span class="text-danger">*</span>
-                    </label>
-                    <input type="text" class="form-control" id="first_name" name="first_name" 
-                           value="<?= escape($old['first_name'] ?? '') ?>" required autofocus>
+                        <label class="form-label">
+                            Candidate Name <span class="text-danger">*</span>
+                        </label>
+                        <input type="text" class="form-control" name="candidate_name" required 
+                               placeholder="John Doe">
                 </div>
-                
-                <div class="col-md-6">
-                    <label for="last_name" class="form-label">
-                        Last Name <span class="text-danger">*</span>
-                    </label>
-                    <input type="text" class="form-control" id="last_name" name="last_name" 
-                           value="<?= escape($old['last_name'] ?? '') ?>" required>
-                </div>
+
                 
                 <div class="col-md-6">
                     <label for="email" class="form-label">
@@ -159,20 +152,18 @@ require_once __DIR__ . '/../../includes/header.php';
                            placeholder="e.g., Senior Developer">
                 </div>
                 
-                <div class="col-md-6">
-                    <label for="years_of_experience" class="form-label">Years of Experience</label>
-                    <input type="number" class="form-control" id="years_of_experience" name="years_of_experience" 
-                           value="<?= $old['years_of_experience'] ?? '' ?>" 
-                           min="0" max="50" step="0.5"
-                           placeholder="e.g., 5">
-                </div>
-                
-                <div class="col-md-6">
-                    <label for="current_location" class="form-label">Current Location</label>
-                    <input type="text" class="form-control" id="current_location" name="current_location" 
-                           value="<?= escape($old['current_location'] ?? '') ?>"
-                           placeholder="City, Country">
-                </div>
+                    <!-- Current Location -->
+                    <div class="col-md-6">
+                        <label class="form-label">
+                            Current Location <span class="text-danger">*</span>
+                        </label>
+                        <select class="form-select" name="current_location" required>
+                            <option value="">Select location...</option>
+                            <?php foreach (CANDIDATE_LOCATIONS as $value => $label): ?>
+                                <option value="<?= $value ?>"><?= $label ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
                 
                 <div class="col-12">
                     <label for="skills" class="form-label">Key Skills</label>

@@ -828,18 +828,6 @@ CREATE TABLE `documents` (
 -- SECTION 5: STATUS HISTORY TRACKING
 -- ============================================================================
 
-CREATE TABLE `candidate_status_history` (
-    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    `candidate_code` VARCHAR(50) NOT NULL,
-    `old_status` VARCHAR(50),
-    `new_status` VARCHAR(50) NOT NULL,
-    `changed_by` VARCHAR(50),
-    `changed_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `notes` TEXT,
-    INDEX `idx_candidate` (`candidate_code`),
-    INDEX `idx_changed_at` (`changed_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 CREATE TABLE `job_status_history` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `job_code` VARCHAR(50) NOT NULL,
@@ -866,27 +854,6 @@ CREATE TABLE `submission_status_history` (
     INDEX `idx_changed_at` (`changed_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE `interviews` (
-    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    `submission_code` VARCHAR(50) NOT NULL,
-    `interview_date` DATETIME NOT NULL,
-    `interview_type` ENUM('phone', 'video', 'in-person') DEFAULT 'phone',
-    `feedback` TEXT,
-    `status` ENUM('scheduled', 'completed', 'cancelled') DEFAULT 'scheduled',
-    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (`submission_code`) REFERENCES `submissions`(`submission_code`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE `offers` (
-    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    `offer_code` VARCHAR(50) UNIQUE NOT NULL,
-    `submission_code` VARCHAR(50) NOT NULL,
-    `status` ENUM('draft', 'sent', 'accepted', 'rejected', 'expired') DEFAULT 'draft',
-    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (`submission_code`) REFERENCES `submissions`(`submission_code`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 -- ============================================================================
 -- SECTION 6: SYSTEM TABLES
 -- ============================================================================

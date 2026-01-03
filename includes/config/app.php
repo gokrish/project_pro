@@ -11,7 +11,7 @@ return [
     // APPLICATION SETTINGS
     // ============================================================================
     'app_name' => 'ProConsultancy',
-    'app_version' => '5.0.0',
+    'app_version' => '2.0.0',
     'app_env' => 'development', 
     'app_debug' => true,
     'app_url' => 'http://proconsultancy.test',

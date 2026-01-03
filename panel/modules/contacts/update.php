@@ -94,14 +94,12 @@ try {
     // Update contact
     $stmt = $conn->prepare("
         UPDATE contacts SET
-            first_name = ?,
-            last_name = ?,
+            candidate_name = ?,
             email = ?,
             phone = ?,
             linkedin_url = ?,
             current_company = ?,
             current_title = ?,
-            years_of_experience = ?,
             current_location = ?,
             skills = ?,
             summary = ?,

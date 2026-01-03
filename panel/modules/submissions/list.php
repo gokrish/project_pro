@@ -219,7 +219,7 @@ require_once __DIR__ . '/../../includes/header.php';
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <h6 class="text-muted mb-1">Pending Approval</h6>
-                        <h2 class="mb-0 text-warning"><?= number_format($stats['pending_approval']) ?></h2>
+                        <h2 class="mb-0 text-warning"><?= number_format($stats['pending_approval']?? 0) ?></h2>
                         <small class="text-muted">Needs manager review</small>
                     </div>
                     <div class="align-self-center">
@@ -236,7 +236,7 @@ require_once __DIR__ . '/../../includes/header.php';
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <h6 class="text-muted mb-1">Ready to Send</h6>
-                        <h2 class="mb-0 text-success"><?= number_format($stats['ready_to_send']) ?></h2>
+                        <h2 class="mb-0 text-success"><?= number_format($stats['ready_to_send']?? 0) ?></h2>
                         <small class="text-muted">Approved by manager</small>
                     </div>
                     <div class="align-self-center">
@@ -270,7 +270,7 @@ require_once __DIR__ . '/../../includes/header.php';
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <h6 class="text-muted mb-1">Placements</h6>
-                        <h2 class="mb-0 text-primary"><?= number_format($stats['placed']) ?></h2>
+                        <h2 class="mb-0 text-primary"><?= number_format($stats['placed'] ?? 0) ?></h2>
                         <small class="text-muted">Successfully placed</small>
                     </div>
                     <div class="align-self-center">
@@ -379,7 +379,7 @@ require_once __DIR__ . '/../../includes/header.php';
     <div class="card-header d-flex justify-content-between align-items-center">
         <h5 class="mb-0">
             Submissions 
-            <span class="badge bg-secondary"><?= number_format($totalCount) ?> total</span>
+            <span class="badge bg-secondary"><?= number_format($totalCount ?? 0) ?> total</span>
         </h5>
         <?php if (Permission::can('submissions', 'approve')): ?>
             <a href="approval-dashboard.php" class="btn btn-sm btn-warning">
@@ -508,7 +508,7 @@ require_once __DIR__ . '/../../includes/header.php';
                         </ul>
                     </nav>
                     <p class="text-center text-muted small mt-2 mb-0">
-                        Showing <?= number_format($offset + 1) ?> to <?= number_format(min($offset + $perPage, $totalCount)) ?> of <?= number_format($totalCount) ?> submissions
+                        Showing <?= number_format($offset + 1 ?? 0) ?> to <?= number_format(min($offset + $perPage ?? 0, $totalCount ?? 0)) ?> of <?= number_format($totalCount ?? 0) ?> submissions
                     </p>
                 </div>
             <?php endif; ?>

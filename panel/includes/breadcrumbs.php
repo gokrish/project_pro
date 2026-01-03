@@ -1,35 +1,13 @@
 <?php
 /**
  * Breadcrumbs Component
- * Dynamic breadcrumb navigation
  * 
- * @version 2.0
+ * IMPORTANT: Breadcrumbs are now rendered in header.php
+ * This file is kept for backward compatibility only
+ * 
+ * @version 5.1 FINAL
+ * @deprecated Use $breadcrumbs array in page, header.php renders them
  */
 
-if (empty($breadcrumbs)) {
-    return;
-}
-?>
-
-<nav aria-label="breadcrumb">
-    <ol class="breadcrumb breadcrumb-style1">
-        <li class="breadcrumb-item">
-            <a href="/panel/dashboard.php">
-                <i class="bx bx-home-alt"></i>
-            </a>
-        </li>
-        <?php foreach ($breadcrumbs as $index => $crumb): ?>
-            <?php if ($index === count($breadcrumbs) - 1): ?>
-                <li class="breadcrumb-item active" aria-current="page">
-                    <?= htmlspecialchars($crumb['title']) ?>
-                </li>
-            <?php else: ?>
-                <li class="breadcrumb-item">
-                    <a href="<?= htmlspecialchars($crumb['url']) ?>">
-                        <?= htmlspecialchars($crumb['title']) ?>
-                    </a>
-                </li>
-            <?php endif; ?>
-        <?php endforeach; ?>
-    </ol>
-</nav>
+// This file intentionally left minimal to prevent duplication
+// Breadcrumbs are rendered in header.php when $breadcrumbs array is defined

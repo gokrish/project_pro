@@ -98,20 +98,6 @@ INSERT INTO `permissions` (`permission_code`, `permission_name`, `module`, `desc
 ('submissions.client_response', 'Record Client Response', 'submissions', 'Record client feedback'),
 ('submissions.convert_to_application', 'Convert to Application', 'submissions', 'Convert approved submission');
 
--- Applications Module
-INSERT INTO `permissions` (`permission_code`, `permission_name`, `module`, `description`) VALUES
-('applications.view_all', 'View All Applications', 'applications', 'View all applications'),
-('applications.view_own', 'View Own Applications', 'applications', 'View only own applications'),
-('applications.create', 'Create Application', 'applications', 'Create new applications'),
-('applications.edit', 'Edit Any Application', 'applications', 'Edit any application'),
-('applications.edit_own', 'Edit Own Applications', 'applications', 'Edit only own applications'),
-('applications.delete', 'Delete Any Application', 'applications', 'Delete any application'),
-('applications.delete_own', 'Delete Own Applications', 'applications', 'Delete only own applications'),
-('applications.schedule_interview', 'Schedule Interview', 'applications', 'Schedule interviews'),
-('applications.make_offer', 'Make Offer', 'applications', 'Create job offers'),
-('applications.update_status', 'Update Status', 'applications', 'Update application status'),
-('applications.view_pipeline', 'View Pipeline', 'applications', 'View application pipeline'),
-('applications.place_candidate', 'Place Candidate', 'applications', 'Complete placement');
 
 -- CV Inbox Module
 INSERT INTO `permissions` (`permission_code`, `permission_name`, `module`, `description`) VALUES
@@ -221,15 +207,6 @@ AND p.permission_code IN (
     'submissions.reject',
     'submissions.client_response',
     'submissions.convert_to_application',
-    -- Applications
-    'applications.view_all',
-    'applications.create',
-    'applications.edit',
-    'applications.schedule_interview',
-    'applications.make_offer',
-    'applications.update_status',
-    'applications.view_pipeline',
-    'applications.place_candidate',
     -- CV Inbox
     'cv_inbox.view_all',
     'cv_inbox.convert',
@@ -280,15 +257,6 @@ AND p.permission_code IN (
     'submissions.create',
     'submissions.edit_own',
     'submissions.delete_own',
-    -- Applications
-    'applications.view_all',
-    'applications.view_own',
-    'applications.create',
-    'applications.edit_own',
-    'applications.schedule_interview',
-    'applications.make_offer',
-    'applications.update_status',
-    'applications.view_pipeline',
     -- CV Inbox
     'cv_inbox.view_all',
     'cv_inbox.add_manual',
@@ -324,12 +292,6 @@ AND p.permission_code IN (
     'submissions.view_own',
     'submissions.create',
     'submissions.edit_own',
-    -- Applications
-    'applications.view_own',
-    'applications.create',
-    'applications.edit_own',
-    'applications.schedule_interview',
-    'applications.update_status',
     -- CV Inbox
     'cv_inbox.view_own',
     'cv_inbox.add_manual',
@@ -354,9 +316,6 @@ AND p.permission_code IN (
     'candidates.create',
     -- Jobs
     'jobs.view_all',
-    -- Applications
-    'applications.view_own',
-    'applications.schedule_interview',
     -- CV Inbox
     'cv_inbox.view_own',
     'cv_inbox.add_manual'

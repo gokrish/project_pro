@@ -267,6 +267,23 @@ CREATE TABLE `candidate_communications` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ============================================================================
+-- CAN STATUS HISTORY TRACKING
+-- ============================================================================
+
+
+CREATE TABLE `candidate_status_history` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `candidate_code` VARCHAR(50) NOT NULL,
+    `old_status` VARCHAR(50),
+    `new_status` VARCHAR(50) NOT NULL,
+    `changed_by` VARCHAR(50),
+    `changed_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `notes` TEXT,
+    INDEX `idx_candidate` (`candidate_code`),
+    INDEX `idx_changed_at` (`changed_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
 -- 6. HR COMMENTS (Confidential)
 -- ============================================================================
 CREATE TABLE `candidate_hr_comments` (
