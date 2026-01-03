@@ -324,7 +324,186 @@ require_once __DIR__ . '/../../includes/header.php';
                 <?php endif; ?>
             </div>
         </div>
+<!-- Submissions Section -->
+<div class="card mt-4">
+    <div class="card-header">
+        <h5 class="mb-0">Submissions for this Client</h5>
+    </div>
+    <div class="card-body">
+        <?php
+        // Get all submissions for this client's jobs
+        $submissionStmt = $conn->prepare("
+            SELECT 
+                s.submission_code,
+                s.internal_status,
+                s.client_status,
+                s.created_at,
+                c.name as candidate_name,
+                j.job_title,
+                j.job_code,
+                u.name as submitted_by_name
+            FROM submissions s
+            JOIN candidates c ON s.candidate_code = c.candidate_code
+            JOIN jobs j ON s.job_code = j.job_code
+            JOIN users u ON s.submitted_by = u.user_code
+            WHERE j.client_code = ?
+            AND s.deleted_at IS NULL
+            ORDER BY s.created_at DESC
+            LIMIT 50
+        ");
+        $submissionStmt->bind_param("s", $clientCode);
+        $submissionStmt->execute();
+        $submissions = $submissionStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        
+        if (count($submissions) > 0): ?>
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Candidate</th>
+                            <th>Job</th>
+                            <th>Status</th>
+                            <th>Submitted By</th>
+                            <th>Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($submissions as $sub): ?>
+                            <tr>
+                                <td>
+                                    <a href="/panel/modules/candidates/view.php?code=<?= $sub['candidate_code'] ?>">
+                                        <?= htmlspecialchars($sub['candidate_name']) ?>
+                                    </a>
+                                </td>
+                                <td>
+                                    <a href="/panel/modules/jobs/view.php?code=<?= $sub['job_code'] ?>">
+                                        <?= htmlspecialchars($sub['job_title']) ?>
+                                    </a>
+                                </td>
+                                <td>
+                                    <?= getInternalStatusBadge($sub['internal_status']) ?>
+                                    <?php if ($sub['internal_status'] === 'approved'): ?>
+                                        <?= getClientStatusBadge($sub['client_status']) ?>
+                                    <?php endif; ?>
+                                </td>
+                                <td><?= htmlspecialchars($sub['submitted_by_name']) ?></td>
+                                <td><?= date('d/m/Y', strtotime($sub['created_at'])) ?></td>
+                                <td>
+                                    <a href="/panel/modules/submissions/view.php?code=<?= $sub['submission_code'] ?>" 
+                                       class="btn btn-sm btn-outline-primary">
+                                        View
+                                    </a>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php else: ?>
+            <p class="text-muted">No submissions yet for this client.</p>
+        <?php endif; ?>
+    </div>
+</div>
 
+<!-- Placement History Section -->
+<div class="card mt-4">
+    <div class="card-header">
+        <h5 class="mb-0">Placement History</h5>
+    </div>
+    <div class="card-body">
+        <?php
+        // Get placements
+        $placementStmt = $conn->prepare("
+            SELECT 
+                s.submission_code,
+                s.placement_date,
+                s.placement_notes,
+                c.name as candidate_name,
+                j.job_title
+            FROM submissions s
+            JOIN candidates c ON s.candidate_code = c.candidate_code
+            JOIN jobs j ON s.job_code = j.job_code
+            WHERE j.client_code = ?
+            AND s.client_status = 'placed'
+            AND s.deleted_at IS NULL
+            ORDER BY s.placement_date DESC
+        ");
+        $placementStmt->bind_param("s", $clientCode);
+        $placementStmt->execute();
+        $placements = $placementStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        
+        if (count($placements) > 0): ?>
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Candidate</th>
+                            <th>Position</th>
+                            <th>Placement Date</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($placements as $placement): ?>
+                            <tr>
+                                <td><?= htmlspecialchars($placement['candidate_name']) ?></td>
+                                <td><?= htmlspecialchars($placement['job_title']) ?></td>
+                                <td><?= date('d/m/Y', strtotime($placement['placement_date'])) ?></td>
+                                <td><?= htmlspecialchars($placement['placement_notes'] ?? '-') ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php else: ?>
+            <p class="text-muted">No placements yet.</p>
+        <?php endif; ?>
+    </div>
+</div>
+
+<!-- Client Statistics -->
+<div class="row mt-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h3 class="mb-0 text-primary"><?= count($submissions) ?></h3>
+                <small class="text-muted">Total Submissions</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h3 class="mb-0 text-warning">
+                    <?= count(array_filter($submissions, fn($s) => $s['client_status'] === 'interviewing')) ?>
+                </h3>
+                <small class="text-muted">Interviewing</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h3 class="mb-0 text-success"><?= count($placements) ?></h3>
+                <small class="text-muted">Placements</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <?php
+                $successRate = count($submissions) > 0 
+                    ? round((count($placements) / count($submissions)) * 100) 
+                    : 0;
+                ?>
+                <h3 class="mb-0 text-info"><?= $successRate ?>%</h3>
+                <small class="text-muted">Success Rate</small>
+            </div>
+        </div>
+    </div>
+</div>
         <!-- Active Placements -->
         <div class="card mb-4">
             <div class="card-header">

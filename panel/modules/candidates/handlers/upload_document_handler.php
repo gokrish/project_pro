@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../../_common.php';
 use ProConsultancy\Core\Permission;
 use ProConsultancy\Core\Database;
+use ProConsultancy\Core\Auth;
 use ProConsultancy\Core\CSRFToken;
 use ProConsultancy\Core\Logger;
 use ProConsultancy\Core\FlashMessage;
@@ -74,11 +75,12 @@ try {
     $stmt->execute();
     
     // Log activity
-    Logger::getInstance()->logActivity(
-        'document_upload',
+    Logger::getInstance()->info(
         'candidates',
+        'document_upload',
         $candidateCode,
-        "Uploaded document: {$originalName} ({$documentType})"
+        "Document uploaded: {$filename}",
+        ['filename' => $filename, 'file_size' => $fileSize, 'mime_type' => $mimeType]
     );
     
     FlashMessage::success('Document uploaded successfully');

@@ -62,12 +62,12 @@ try {
         throw new Exception('Failed to withdraw submission: ' . $conn->error);
     }
     
-    Logger::getInstance()->logActivity(
-        'withdraw',
+    Logger::getInstance()->info(
         'submissions',
-        $submission_code,
-        "Submission withdrawn: {$withdrawal_reason}",
-        ['reason' => $withdrawal_reason]
+        'withdraw',
+        $submissionCode,
+        "Submission withdrawn",
+        ['reason' => $withdrawalReason]
     );
     
     redirectWithMessage(

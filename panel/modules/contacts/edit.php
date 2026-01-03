@@ -123,21 +123,12 @@ require_once __DIR__ . '/../../includes/header.php';
                 Basic Information
             </h5>
             
-            <div class="row g-3">
-                <div class="col-md-6">
-                    <label for="first_name" class="form-label">
-                        First Name <span class="text-danger">*</span>
-                    </label>
-                    <input type="text" class="form-control" id="first_name" name="first_name" 
-                           value="<?= escape($contact['first_name']) ?>" required>
-                </div>
-                
-                <div class="col-md-6">
-                    <label for="last_name" class="form-label">
-                        Last Name <span class="text-danger">*</span>
-                    </label>
-                    <input type="text" class="form-control" id="last_name" name="last_name" 
-                           value="<?= escape($contact['last_name']) ?>" required>
+                   <div class="col-md-6">
+                        <label class="form-label">
+                            Candidate Name <span class="text-danger">*</span>
+                        </label>
+                        <input type="text" class="form-control" name="candidate_name" required 
+                               placeholder="John Doe">
                 </div>
                 
                 <div class="col-md-6">
@@ -185,11 +176,6 @@ require_once __DIR__ . '/../../includes/header.php';
                            value="<?= escape($contact['current_title']) ?>">
                 </div>
                 
-                <div class="col-md-6">
-                    <label for="years_of_experience" class="form-label">Years of Experience</label>
-                    <input type="number" class="form-control" id="years_of_experience" name="years_of_experience" 
-                           value="<?= $contact['years_of_experience'] ?>" min="0" max="50" step="0.5">
-                </div>
                 
                 <div class="col-md-6">
                     <label for="current_location" class="form-label">Current Location</label>
@@ -231,7 +217,6 @@ require_once __DIR__ . '/../../includes/header.php';
                         <option value="job_board" <?= $contact['source'] === 'job_board' ? 'selected' : '' ?>>Job Board</option>
                         <option value="networking" <?= $contact['source'] === 'networking' ? 'selected' : '' ?>>Networking Event</option>
                         <option value="social_media" <?= $contact['source'] === 'social_media' ? 'selected' : '' ?>>Social Media</option>
-                        <option value="cold_outreach" <?= $contact['source'] === 'cold_outreach' ? 'selected' : '' ?>>Cold Outreach</option>
                         <option value="other" <?= $contact['source'] === 'other' ? 'selected' : '' ?>>Other</option>
                     </select>
                 </div>

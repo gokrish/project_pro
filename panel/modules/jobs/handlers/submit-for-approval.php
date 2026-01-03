@@ -9,7 +9,7 @@ use ProConsultancy\Core\Database;
 use ProConsultancy\Core\Auth;
 use ProConsultancy\Core\CSRFToken;
 use ProConsultancy\Core\Logger;
-
+use ProConsultancy\Core\Mailer;
 Permission::require('jobs', 'create');
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -50,31 +50,59 @@ try {
         throw new Exception('Job title and description are required before submission');
     }
     
-    // Update status
-    $stmt = $conn->prepare("
-        UPDATE jobs
-        SET approval_status = 'pending_approval',
-            submitted_for_approval_at = NOW(),
-            updated_at = NOW()
-        WHERE job_code = ?
+    // Update job status
+    $stmt = $conn->prepare("UPDATE jobs SET approval_status = 'pending_approval', submitted_for_approval_at = NOW() WHERE job_code = ?");
+    $stmt->bind_param("s", $jobCode);
+    $stmt->execute();
+
+    // Get job details for email
+    $jobStmt = $conn->prepare("
+        SELECT j.*, c.company_name 
+        FROM jobs j 
+        LEFT JOIN clients c ON j.client_code = c.client_code 
+        WHERE j.job_code = ?
     ");
-    
-    $stmt->bind_param("s", $job_code);
-    
-    if (!$stmt->execute()) {
-        throw new Exception('Failed to submit job: ' . $conn->error);
+    $jobStmt->bind_param("s", $jobCode);
+    $jobStmt->execute();
+    $job = $jobStmt->get_result()->fetch_assoc();
+
+    // Get all managers (level = 'manager' OR 'admin' OR 'super_admin')
+    $managerStmt = $conn->prepare("
+        SELECT email, name 
+        FROM users 
+        WHERE level IN ('manager', 'admin', 'super_admin') 
+        AND is_active = 1
+    ");
+    $managerStmt->execute();
+    $managers = $managerStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+    // Send email to each manager
+    foreach ($managers as $manager) {
+        Mailer::send(
+            $manager['email'],
+            "New Job Awaiting Approval: {$job['job_title']}",
+            'job_approval_request',
+            [
+                'manager_name' => $manager['name'],
+                'job_title' => $job['job_title'],
+                'job_code' => $job['job_code'],
+                'client_name' => $job['company_name'],
+                'location' => $job['location'],
+                'submitted_by' => Auth::user()['name'],
+                'submitted_at' => date('d/m/Y H:i'),
+                'approval_url' => BASE_URL . '/panel/modules/jobs/approve.php?code=' . $job['job_code']
+            ]
+        );
     }
-    
-    // Log activity
-    Logger::getInstance()->logActivity(
-        'submit_for_approval',
-        'jobs',
-        $job_code,
-        "Job submitted for approval: {$job['job_title']}",
-        ['submitted_by' => $user['user_code']]
+
+    Logger::getInstance()->info(
+        'jobs', 
+        'submit_for_approval', 
+        $jobCode, 
+        "Job submitted for approval, {$count($managers)} managers notified"
     );
-    
-    // TODO: Send email notification to managers
+
+    FlashMessage::success("Job submitted for approval. Managers have been notified.");
     
     redirectWithMessage(
         "/panel/modules/jobs/?action=view&code={$job_code}",

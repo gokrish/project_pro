@@ -159,17 +159,12 @@ try {
         $description .= " | Notes: " . substr($notes, 0, 100);
     }
     
-    Logger::getInstance()->logActivity(
-        'status_change',
+    Logger::getInstance()->info(
         'candidates',
+        'status_change',
         $candidateCode,
-        $description,
-        [
-            'old_status' => $oldStatus,
-            'new_status' => $newStatus,
-            'notes' => $notes,
-            'next_follow_up' => $nextFollowUp
-        ]
+        "Status changed from {$oldStatus} to {$newStatus}",
+        ['old_status' => $oldStatus, 'new_status' => $newStatus, 'reason' => $reason]
     );
     
     $conn->commit();

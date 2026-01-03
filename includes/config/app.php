@@ -2,7 +2,6 @@
 /**
  * Application Configuration
  * 
- * @package ProConsultancy
  * @version 2.0
  */
 
@@ -67,11 +66,6 @@ return [
     // ============================================================================
     'from_email' => 'noreply@proconsultancy.com',
     'from_name' => 'ProConsultancy',
-    
-    // ============================================================================
-    // LOGGING SETTINGS
-    // ============================================================================
-    'log_level' => 'info', // debug, info, warning, error
     
     // ============================================================================
     // FEATURE FLAGS

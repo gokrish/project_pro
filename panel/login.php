@@ -1,8 +1,8 @@
 <?php
 /**
- * Login Page - TOKEN BASED with DEV MODE
+ * Login Page
  * 
- * @version 5.0 - Fixed class loading order
+ * @version 2.0
  */
 
 // Define PANEL_ACCESS before loading anything
@@ -19,9 +19,7 @@ if (!defined('INCLUDES_PATH')) {
     define('INCLUDES_PATH', ROOT_PATH . '/includes');
 }
 
-// ============================================================================
-// AUTOLOADER - Load this FIRST
-// ============================================================================
+// Autoloader
 spl_autoload_register(function ($class) {
     $prefix = 'ProConsultancy\\';
     $base_dir = INCLUDES_PATH . '/';
@@ -39,102 +37,18 @@ spl_autoload_register(function ($class) {
     }
 });
 
-// ============================================================================
-// LOAD CONFIGURATION - This defines DEV_MODE, DB constants, etc.
-// ============================================================================
+// Load configuration
 require_once INCLUDES_PATH . '/config/config.php';
 
-// ============================================================================
-// NOW we can safely use namespaced classes
-// ============================================================================
+// Load core classes
 use ProConsultancy\Core\Auth;
 use ProConsultancy\Core\Session;
 use ProConsultancy\Core\CSRFToken;
 
-// ============================================================================
-// START SESSION
-// ============================================================================
+// Start session
 Session::start();
 
-// ============================================================================
-// DEV MODE: Auto-login and redirect
-// ============================================================================
-if (defined('DEV_MODE') && DEV_MODE && defined('DEV_AUTO_LOGIN') && DEV_AUTO_LOGIN) {
-    
-    // If not authenticated, setup dev login
-    if (!isset($_SESSION['authenticated']) || $_SESSION['authenticated'] !== true) {
-        try {
-            $devConn = mysqli_connect(DB_HOST, DB_USER, DB_PASS, DB_NAME);
-            
-            if ($devConn) {
-                mysqli_set_charset($devConn, 'utf8mb4');
-                
-                $stmt = $devConn->prepare("SELECT * FROM users WHERE user_code = ? AND is_active = 1 LIMIT 1");
-                $devUserCode = defined('DEV_USER_CODE') ? DEV_USER_CODE : 'ADMIN';
-                $stmt->bind_param("s", $devUserCode);
-                $stmt->execute();
-                $result = $stmt->get_result();
-                
-                if ($user = $result->fetch_assoc()) {
-                    // Create dev token
-                    $devToken = 'DEV_TOKEN_' . md5($devUserCode . 'proconsultancy');
-                    
-                    // Check if dev token exists
-                    $checkStmt = $devConn->prepare("SELECT id FROM tokens WHERE token = ?");
-                    $checkStmt->bind_param("s", $devToken);
-                    $checkStmt->execute();
-                    $tokenExists = $checkStmt->get_result()->num_rows > 0;
-                    
-                    // Create token if doesn't exist
-                    if (!$tokenExists) {
-                        $expiryDays = defined('DEV_TOKEN_EXPIRY_DAYS') ? DEV_TOKEN_EXPIRY_DAYS : 365;
-                        $insertStmt = $devConn->prepare(
-                            "INSERT INTO tokens (user_code, token, expires_at, ip_address, user_agent, created_at) 
-                             VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? DAY), '127.0.0.1', 'DEV_MODE', NOW())"
-                        );
-                        $insertStmt->bind_param("ssi", $devUserCode, $devToken, $expiryDays);
-                        $insertStmt->execute();
-                    }
-                    
-                    // Set session variables
-                    $_SESSION['auth_token'] = $devToken;
-                    $_SESSION['authenticated'] = true;
-                    $_SESSION['user_id'] = $user['id'];
-                    $_SESSION['user_code'] = $user['user_code'];
-                    $_SESSION['user_name'] = $user['name'];
-                    $_SESSION['user_email'] = $user['email'];
-                    $_SESSION['user_level'] = $user['level'];
-                    $_SESSION['login_time'] = time();
-                    $_SESSION['dev_mode'] = true;
-                    
-                    // Set cookie
-                    setcookie('auth_token', $devToken, time() + 86400, '/', '', false, true);
-                    
-                    error_log("DEV MODE: Auto-logged in as {$user['user_code']} ({$user['name']})");
-                    
-                    // Redirect to dashboard
-                    header('Location: /panel/dashboard.php');
-                    exit;
-                }
-                
-                $devConn->close();
-            }
-        } catch (Exception $e) {
-            error_log("DEV MODE ERROR: " . $e->getMessage());
-            // Continue to show login form
-        }
-    } else {
-        // Already authenticated in dev mode - redirect
-        header('Location: /panel/dashboard.php');
-        exit;
-    }
-}
-
-// ============================================================================
-// NORMAL AUTH CHECK (Production mode)
-// ============================================================================
-
-// Check if already logged in (production mode)
+// Check if already logged in
 if (Auth::check()) {
     header('Location: /panel/dashboard.php');
     exit;
@@ -160,8 +74,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // Attempt login
         if (Auth::attempt($identifier, $password, $remember)) {
-            // Success - redirect
-            header('Location: /panel/dashboard.php');
+            // Success - redirect to intended page or dashboard
+            $returnTo = $_SESSION['return_to'] ?? '/panel/dashboard.php';
+            unset($_SESSION['return_to']);
+            header('Location: ' . $returnTo);
             exit;
         } else {
             $error = 'Invalid email/user code or password';
@@ -180,110 +96,209 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - ProConsultancy</title>
     
-    <link rel="icon" type="image/x-icon" href="/panel/assets/images/favicon.ico">
+    <link rel="icon" type="image/x-icon" href="/panel/assets/img/favicon.ico">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/boxicons@2.1.4/css/boxicons.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
         body {
             font-family: 'Inter', sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #1e3a8a; /* Thick blue background */
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
             padding: 20px;
         }
+        
         .login-container {
             background: white;
-            border-radius: 16px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            border-radius: 20px;
+            box-shadow: 0 25px 70px rgba(0, 0, 0, 0.4);
             width: 100%;
-            max-width: 450px;
+            max-width: 480px;
             overflow: hidden;
         }
+        
         .login-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
             color: white;
-            padding: 40px 30px;
+            padding: 50px 40px;
             text-align: center;
         }
+        
+        .company-icon {
+            width: 70px;
+            height: 70px;
+            margin: 0 auto 20px;
+            background: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        .company-icon img {
+            width: 45px;
+            height: 45px;
+            object-fit: contain;
+        }
+        
+        .company-icon i {
+            font-size: 40px;
+            color: #1e3a8a;
+        }
+        
         .login-header h1 {
-            font-size: 28px;
+            font-size: 32px;
             font-weight: 700;
             margin: 0 0 10px 0;
+            letter-spacing: -0.5px;
         }
+        
+        .login-header p {
+            font-size: 15px;
+            margin: 0;
+            opacity: 0.95;
+        }
+        
         .login-body {
-            padding: 40px 30px;
+            padding: 45px 40px;
         }
+        
+        .form-label {
+            font-weight: 600;
+            color: #334155;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        
         .form-control {
-            padding: 12px 16px;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
+            padding: 14px 16px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 15px;
+            transition: all 0.3s ease;
         }
+        
         .form-control:focus {
-            border-color: #667eea;
-            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+            border-color: #1e3a8a;
+            box-shadow: 0 0 0 0.25rem rgba(30, 58, 138, 0.15);
         }
+        
+        .password-wrapper {
+            position: relative;
+        }
+        
+        .password-toggle {
+            position: absolute;
+            right: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: #64748b;
+            cursor: pointer;
+            padding: 4px;
+            font-size: 20px;
+            transition: color 0.2s;
+        }
+        
+        .password-toggle:hover {
+            color: #1e3a8a;
+        }
+        
         .btn-login {
             width: 100%;
-            padding: 14px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 16px;
+            background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
             border: none;
-            border-radius: 8px;
+            border-radius: 10px;
             color: white;
             font-weight: 600;
-            transition: transform 0.2s;
+            font-size: 16px;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
         }
+        
         .btn-login:hover {
             transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(30, 58, 138, 0.4);
         }
+        
+        .btn-login:active {
+            transform: translateY(0);
+        }
+        
         .alert {
-            border-radius: 8px;
+            border-radius: 10px;
+            border: none;
+            padding: 14px 18px;
+            margin-bottom: 24px;
         }
-        .dev-mode-notice {
-            position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #f59e0b;
-            color: white;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            z-index: 9999;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        
+        .alert-danger {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+        
+        .form-check-input:checked {
+            background-color: #1e3a8a;
+            border-color: #1e3a8a;
+        }
+        
+        .forgot-password-link {
+            color: #1e3a8a;
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+        
+        .forgot-password-link:hover {
+            color: #1e40af;
+            text-decoration: underline;
         }
     </style>
 </head>
 <body>
-    <?php if (defined('DEV_MODE') && DEV_MODE && defined('DEV_SHOW_BANNER') && DEV_SHOW_BANNER): ?>
-    <div class="dev-mode-notice">
-        🔧 DEV MODE ACTIVE - Auto-login enabled
-    </div>
-    <?php endif; ?>
-    
     <div class="login-container">
         <div class="login-header">
-            <h1><i class="bx bx-briefcase"></i> ProConsultancy</h1>
-            <p class="mb-0">Professional Recruitment Management</p>
+            <div class="company-icon">
+                <!-- Company icon/logo -->
+                <?php if (file_exists(ROOT_PATH . '/panel/assets/img/company-logo.png')): ?>
+                    <img src="/panel/assets/img/company-logo.png" alt="Company Logo">
+                <?php else: ?>
+                    <i class="bx bx-briefcase"></i>
+                <?php endif; ?>
+            </div>
+            <h1>ProConsultancy</h1>
+            <p>Recruitment Management System</p>
         </div>
         
         <div class="login-body">
             <?php if ($error): ?>
             <div class="alert alert-danger">
                 <i class="bx bx-error-circle me-2"></i>
-                <?= htmlspecialchars($error) ?>
+                <strong><?= htmlspecialchars($error) ?></strong>
             </div>
             <?php endif; ?>
             
             <form method="POST" action="">
                 <?= CSRFToken::field() ?>
                 
-                <div class="mb-3">
-                    <label class="form-label fw-semibold">User Code or Email</label>
+                <div class="mb-4">
+                    <label class="form-label">User Code or Email</label>
                     <input type="text" 
                            class="form-control" 
                            name="identifier" 
@@ -293,44 +308,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                            autofocus>
                 </div>
                 
-                <div class="mb-3">
-                    <label class="form-label fw-semibold">Password</label>
-                    <input type="password" 
-                           class="form-control" 
-                           name="password" 
-                           placeholder="Enter your password"
-                           required>
+                <div class="mb-4">
+                    <label class="form-label">Password</label>
+                    <div class="password-wrapper">
+                        <input type="password" 
+                               class="form-control" 
+                               name="password" 
+                               id="password"
+                               placeholder="Enter your password"
+                               required>
+                        <button type="button" 
+                                class="password-toggle" 
+                                onclick="togglePassword()"
+                                aria-label="Toggle password visibility">
+                            <i class="bx bx-hide" id="toggleIcon"></i>
+                        </button>
+                    </div>
                 </div>
                 
                 <div class="mb-4 form-check">
-                    <input type="checkbox" class="form-check-input" name="remember" id="remember">
+                    <input type="checkbox" 
+                           class="form-check-input" 
+                           name="remember" 
+                           id="remember">
                     <label class="form-check-label" for="remember">
                         Remember me for 30 days
                     </label>
                 </div>
                 
                 <button type="submit" class="btn btn-login">
-                    <i class="bx bx-log-in me-2"></i>Sign In
+                    <i class="bx bx-log-in"></i>
+                    <span>Sign In</span>
                 </button>
             </form>
             
-            <?php if (!defined('DEV_MODE') || !DEV_MODE): ?>
             <div class="text-center mt-4">
-                <a href="/panel/forgot-password.php" class="text-decoration-none" style="color: #667eea;">
+                <a href="/panel/forgot-password.php" class="forgot-password-link">
                     <i class="bx bx-lock-open me-1"></i>Forgot your password?
                 </a>
             </div>
-            <?php endif; ?>
-            
-            <?php if (defined('DEV_MODE') && DEV_MODE): ?>
-            <div class="alert alert-warning mt-4 mb-0">
-                <small>
-                    <i class="bx bx-info-circle me-1"></i>
-                    <strong>Dev Mode:</strong> You can login with any credentials or wait for auto-login
-                </small>
-            </div>
-            <?php endif; ?>
         </div>
     </div>
+    
+    <script>
+        function togglePassword() {
+            const passwordInput = document.getElementById('password');
+            const toggleIcon = document.getElementById('toggleIcon');
+            
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                toggleIcon.classList.remove('bx-hide');
+                toggleIcon.classList.add('bx-show');
+            } else {
+                passwordInput.type = 'password';
+                toggleIcon.classList.remove('bx-show');
+                toggleIcon.classList.add('bx-hide');
+            }
+        }
+        
+        // Allow Enter key to toggle password when focused on toggle button
+        document.querySelector('.password-toggle').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                togglePassword();
+            }
+        });
+    </script>
 </body>
 </html>

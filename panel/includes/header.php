@@ -1,7 +1,7 @@
 <?php
 /**
  * ============================================================================
- * HEADER v5.1 FINAL CLEAN - NO DUPLICATES
+ * HEADER
  * ============================================================================
  */
 
@@ -16,7 +16,7 @@ $pageTitle = $pageTitle ?? 'Dashboard';
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= htmlspecialchars($pageTitle) ?> - ProConsultancy ATS</title>
+    <title><?= htmlspecialchars($pageTitle) ?> - ProConsultancy</title>
     
     <!-- Favicon -->
     <link rel="icon" type="image/x-icon" href="/panel/assets/img/favicon.ico">
@@ -37,6 +37,9 @@ $pageTitle = $pageTitle ?? 'Dashboard';
             <link rel="stylesheet" href="<?= htmlspecialchars($css) ?>">
         <?php endforeach; ?>
     <?php endif; ?>
+    
+    <!-- Global Search JS -->
+    <script src="/panel/assets/js/global-search.js" defer></script>
 </head>
 <body>
     <div class="page-wrapper">
@@ -45,12 +48,15 @@ $pageTitle = $pageTitle ?? 'Dashboard';
         
         <!-- Main Content -->
         <div class="main-content">
-            <!-- Top Bar -->
+            <!-- Top Navigation Bar -->
             <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom sticky-top">
                 <div class="container-fluid px-4">
+                    <!-- Page Title -->
                     <h4 class="mb-0 fw-semibold"><?= htmlspecialchars($pageTitle) ?></h4>
                     
+                    <!-- Right Side Navigation -->
                     <div class="d-flex align-items-center ms-auto gap-3">
+                        
                         <!-- Search -->
                         <div class="d-flex align-items-center">
                             <i class="bx bx-search fs-5 text-muted me-2"></i>
@@ -61,9 +67,9 @@ $pageTitle = $pageTitle ?? 'Dashboard';
                                    style="width: 300px;">
                         </div>
                         
-                        <!-- Quick Actions -->
+                        <!-- Quick Actions Dropdown -->
                         <div class="dropdown">
-                            <a class="nav-link p-1" href="#" data-bs-toggle="dropdown">
+                            <a class="nav-link p-1" href="#" data-bs-toggle="dropdown" aria-expanded="false">
                                 <i class="bx bx-grid-alt fs-5 text-muted"></i>
                             </a>
                             <div class="dropdown-menu dropdown-menu-end p-2" style="min-width: 320px;">
@@ -97,10 +103,11 @@ $pageTitle = $pageTitle ?? 'Dashboard';
                             </div>
                         </div>
                         
-                        <!-- Notifications -->
+                        <!-- Notifications Dropdown -->
                         <div class="dropdown">
-                            <a class="nav-link p-1 position-relative" href="#" data-bs-toggle="dropdown">
+                            <a class="nav-link p-1 position-relative" href="#" data-bs-toggle="dropdown" aria-expanded="false">
                                 <i class="bx bx-bell fs-5 text-muted"></i>
+                                <!-- Notification badge will be added when notification system is implemented -->
                             </a>
                             <ul class="dropdown-menu dropdown-menu-end" style="min-width: 280px;">
                                 <li class="dropdown-header fw-semibold">Notifications</li>
@@ -112,11 +119,12 @@ $pageTitle = $pageTitle ?? 'Dashboard';
                             </ul>
                         </div>
                         
-                        <!-- User Menu -->
+                        <!-- User Menu Dropdown -->
                         <div class="dropdown">
-                            <a class="nav-link p-0" href="#" data-bs-toggle="dropdown">
+                            <a class="nav-link p-0" href="#" data-bs-toggle="dropdown" aria-expanded="false">
                                 <div class="avatar">
-                                    <div class="avatar-initial rounded-circle bg-primary text-white fw-semibold" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;">
+                                    <div class="avatar-initial rounded-circle bg-primary text-white fw-semibold" 
+                                         style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;">
                                         <?= $user_initials ?>
                                     </div>
                                 </div>
@@ -126,7 +134,8 @@ $pageTitle = $pageTitle ?? 'Dashboard';
                                     <div class="dropdown-item-text">
                                         <div class="d-flex align-items-center py-2">
                                             <div class="avatar me-3">
-                                                <div class="avatar-initial rounded-circle bg-primary text-white fw-semibold" style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;">
+                                                <div class="avatar-initial rounded-circle bg-primary text-white fw-semibold" 
+                                                     style="width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;">
                                                     <?= $user_initials ?>
                                                 </div>
                                             </div>
@@ -138,28 +147,39 @@ $pageTitle = $pageTitle ?? 'Dashboard';
                                     </div>
                                 </li>
                                 <li><hr class="dropdown-divider"></li>
-                                <li><a class="dropdown-item" href="/panel/modules/users/profile.php"><i class="bx bx-user me-2"></i>My Profile</a></li>
-                                <li><a class="dropdown-item" href="/panel/modules/settings/index.php"><i class="bx bx-cog me-2"></i>Settings</a></li>
+                                <li><a class="dropdown-item" href="/panel/modules/users/profile.php">
+                                    <i class="bx bx-user me-2"></i>My Profile
+                                </a></li>
+                                <li><a class="dropdown-item" href="/panel/modules/settings/index.php">
+                                    <i class="bx bx-cog me-2"></i>Settings
+                                </a></li>
                                 <?php if ($user['level'] === 'admin' || $user['level'] === 'super_admin'): ?>
-                                <li><a class="dropdown-item" href="/panel/modules/users/activity.php"><i class="bx bx-time me-2"></i>Activity Log</a></li>
+                                <li><a class="dropdown-item" href="/panel/activity_log.php">
+                                    <i class="bx bx-time me-2"></i>Activity Log
+                                </a></li>
                                 <?php endif; ?>
                                 <li><hr class="dropdown-divider"></li>
-                                <li><a class="dropdown-item text-danger" href="/panel/logout.php"><i class="bx bx-power-off me-2"></i>Log Out</a></li>
+                                <li><a class="dropdown-item text-danger" href="/panel/logout.php">
+                                    <i class="bx bx-power-off me-2"></i>Log Out
+                                </a></li>
                             </ul>
                         </div>
+                        
                     </div>
                 </div>
             </nav>
             
-            <!-- Content -->
+            <!-- Content Container -->
             <div class="content-container">
                 <?php 
+                // Flash messages
                 if (file_exists(__DIR__ . '/flash-messages.php')) {
                     require_once __DIR__ . '/flash-messages.php';
                 }
                 ?>
                 
                 <?php if (!empty($breadcrumbs) && is_array($breadcrumbs)): ?>
+                <!-- Breadcrumbs -->
                 <nav aria-label="breadcrumb" class="mb-3">
                     <ol class="breadcrumb breadcrumb-style1 mb-0">
                         <li class="breadcrumb-item">
@@ -170,7 +190,9 @@ $pageTitle = $pageTitle ?? 'Dashboard';
                                 <?php if ($index === count($breadcrumbs) - 1): ?>
                                     <?= htmlspecialchars($crumb['title']) ?>
                                 <?php else: ?>
-                                    <a href="<?= htmlspecialchars($crumb['url']) ?>"><?= htmlspecialchars($crumb['title']) ?></a>
+                                    <a href="<?= htmlspecialchars($crumb['url']) ?>">
+                                        <?= htmlspecialchars($crumb['title']) ?>
+                                    </a>
                                 <?php endif; ?>
                             </li>
                         <?php endforeach; ?>

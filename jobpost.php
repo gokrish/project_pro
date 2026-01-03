@@ -22,9 +22,9 @@ if (isset($_GET['ref_no'])) {
 
 <head>
     <meta charset="utf-8">
-    <title>Job Opportunities at test consultancy - Current Openings</title>
-    <meta name="keywords" content="Job Opportunities, Current Openings, Career at test consultancy, Employment, Job Listings">
-    <meta name="description" content="Explore job opportunities at test consultancy. View our current openings and join our team for a rewarding career. Find the perfect employment opportunity that suits your skills and aspirations.">
+    <title>Job Opportunities at Pro consultancy - Current Openings</title>
+    <meta name="keywords" content="Job Opportunities, Current Openings, Career at Pro consultancy, Employment, Job Listings">
+    <meta name="description" content="Explore job opportunities at Pro consultancy. View our current openings and join our team for a rewarding career. Find the perfect employment opportunity that suits your skills and aspirations.">
     <meta content="width=device-width, initial-scale=1.0" name="viewport">
    
     <!-- Favicon -->
@@ -63,7 +63,7 @@ if (isset($_GET['ref_no'])) {
         <div class="row gx-0">
             <div class="col-lg-8 text-center text-lg-start mb-2 mb-lg-0">
                 <div class="d-inline-flex align-items-center" style="height: 45px;">
-                    <small class="me-3 text-light">test consultancy BV&nbsp;&nbsp;<i class="fa fa-map-marker-alt me-2"></i>Leuvensesteenweg 122 Zaventem 1932 Belgium.</small>
+                    <small class="me-3 text-light">Pro consultancy BV&nbsp;&nbsp;<i class="fa fa-map-marker-alt me-2"></i>Leuvensesteenweg 122 Zaventem 1932 Belgium.</small>
                     <small class="me-3 text-light"><i class="fa fa-phone-alt me-2"></i>+32-472849033</small>
                     <small class="text-light"><i class="fa fa-envelope-open me-2"></i><a href="mailto:admin@proconsultancy.be">admin@proconsultancy.be</a></small>
                 </div>
@@ -243,7 +243,7 @@ if (isset($_GET['ref_no'])) {
                         <a href="index.html" class="navbar-brand">
                             <img src="img/pro-consultancy-logo.webp" alt="logo" style="width: 80%;">
                         </a>
-                        <p class="mt-3 mb-4" style="color: #061429;">test consultancy is here to help you if you need support with IT consulting services provider specializing in talent acquisition, strategic projects, offshoring, nearshoring, and customized IT solutions for businesses worldwide. Propel your growth with our expertise . Our main goal is to equip businesses with the strategies and tools they require to succeed.</p>
+                        <p class="mt-3 mb-4" style="color: #061429;">Pro consultancy is here to help you if you need support with IT consulting services provider specializing in talent acquisition, strategic projects, offshoring, nearshoring, and customized IT solutions for businesses worldwide. Propel your growth with our expertise . Our main goal is to equip businesses with the strategies and tools they require to succeed.</p>
                         
                     </div>
                 </div>
@@ -255,7 +255,7 @@ if (isset($_GET['ref_no'])) {
                         </div>
                         <div class="d-flex mb-2">
                             <i class="bi bi-geo-alt text-primary me-2"></i>
-                            <p class="mb-0">test consultancy BV<br/> Leuvensesteenweg 122 <br/> Zaventem-1932 <br/>Belgium<br/>VAT: BE805377241</p>
+                            <p class="mb-0">Pro consultancy BV<br/> Leuvensesteenweg 122 <br/> Zaventem-1932 <br/>Belgium<br/>VAT: BE805377241</p>
                         </div>
                         <div class="d-flex mb-2">
                             <i class="bi bi-envelope-open text-primary me-2"></i>
@@ -275,7 +275,7 @@ if (isset($_GET['ref_no'])) {
                     <!--    </div>-->
                     <!--    <div class="d-flex mb-2">-->
                     <!--        <i class="bi bi-geo-alt text-primary me-2"></i>-->
-                    <!--        <p class="mb-0">test consultancy Pte. Ltd. <br/>68 Circular Road, #02-01, <br/>049422, Singapore <br/>REG: 201438333W</p>-->
+                    <!--        <p class="mb-0">Pro consultancy Pte. Ltd. <br/>68 Circular Road, #02-01, <br/>049422, Singapore <br/>REG: 201438333W</p>-->
                     <!--    </div>-->
                     <!--    <div class="d-flex mb-2">-->
                     <!--        <i class="bi bi-envelope-open text-primary me-2"></i>-->
@@ -312,7 +312,7 @@ if (isset($_GET['ref_no'])) {
                         <div class="d-flex align-items-center justify-content-center" style="height: 75px;">
                             <p class="mb-0">&copy; <script>
                                 document.write(new Date().getFullYear());
-                            </script> test consultancy BV. All Rights Reserved.</p>
+                            </script> Pro consultancy BV. All Rights Reserved.</p>
                             
                         </div>
                     </div>

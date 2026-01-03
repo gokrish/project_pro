@@ -85,7 +85,23 @@ try {
         ]
     );
     
-    // TODO: Send email notification to recruiter
+    // Send rejection email
+    if (!empty($job['recruiter_email'])) {
+        Mailer::send(
+            $job['recruiter_email'],
+            "Job Requires Changes: {$job['job_title']}",
+            'job_rejected',
+            [
+                'recruiter_name' => $job['recruiter_name'],
+                'job_title' => $job['job_title'],
+                'job_code' => $job['job_code'],
+                'rejected_by' => Auth::user()['name'],
+                'rejected_at' => date('d/m/Y H:i'),
+                'rejection_reason' => $_POST['rejection_reason'] ?? '',
+                'job_url' => BASE_URL . '/panel/modules/jobs/edit.php?code=' . $job['job_code']
+            ]
+        );
+    }
     
     redirectWithMessage(
         "/panel/modules/jobs/?action=list",

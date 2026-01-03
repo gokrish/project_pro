@@ -30,8 +30,9 @@ DROP TABLE IF EXISTS `candidate_submissions`;
 DROP TABLE IF EXISTS `activity_log`;
 DROP TABLE IF EXISTS `notes`;
 DROP TABLE IF EXISTS `documents`;
-DROP TABLE IF EXISTS 'cv_notes';
-DROP TABLE IF EXISTS 'cv_inbox';
+DROP TABLE IF EXISTS `cv_notes`;
+DROP TABLE IF EXISTS `cv_inbox`;
+DROP TABLE IF EXISTS `cv_inbox_notes`;
 DROP TABLE IF EXISTS `contact_documents`;
 DROP TABLE IF EXISTS `contact_notes`;
 DROP TABLE IF EXISTS `contact_tag_map`;
@@ -53,7 +54,7 @@ DROP TABLE IF EXISTS `tokens`;
 DROP TABLE IF EXISTS `roles`;
 DROP TABLE IF EXISTS `settings`;
 DROP TABLE IF EXISTS `email_templates`;
-
+DROP TABLE IF EXISTS `work_authorization`;
 -- ============================================================================
 -- SECTION 1: AUTHENTICATION & PERMISSIONS
 -- ============================================================================
@@ -245,7 +246,7 @@ CREATE TABLE `users` (
     `phone` VARCHAR(20),
     `password` VARCHAR(255) NOT NULL,
     `password_changed_at` TIMESTAMP NULL,
-    `level` ENUM('super_admin', 'admin', 'manager', 'senior_recruiter', 'recruiter', 'user') DEFAULT 'recruiter' COMMENT 'Backward compatibility',
+    `level` ENUM('super_admin', 'admin', 'manager', 'senior_recruiter', 'recruiter', 'user') DEFAULT 'recruiter',
     `is_active` BOOLEAN DEFAULT 1,
     `last_login` TIMESTAMP NULL,
     `failed_login_attempts` INT DEFAULT 0,
@@ -256,24 +257,11 @@ CREATE TABLE `users` (
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     `deleted_at` TIMESTAMP NULL,
     FOREIGN KEY (`role_id`) REFERENCES `roles`(`id`) ON DELETE SET NULL,
-    -- ============================================================================
-    -- CREATE INDEXES FOR PERFORMANCE
-    -- ============================================================================
-
-    -- Create index on level (if not exists)
-    CREATE INDEX IF NOT EXISTS idx_users_level ON users(level);
-
-    -- Create index on is_active (if not exists)
-    CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
-
-    -- Create index on email (if not exists)
-    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-
-    -- Create index on user_code (if not exists)
-    CREATE INDEX IF NOT EXISTS idx_users_user_code ON users(user_code);
-
+    INDEX `idx_users_level` (`level`),
+    INDEX `idx_users_is_active` (`is_active`),
+    INDEX `idx_users_email` (`email`),
+    INDEX `idx_users_user_code` (`user_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 -- User sessions (remember me)
 CREATE TABLE `user_sessions` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -327,113 +315,6 @@ CREATE TABLE `password_resets` (
 -- ============================================================================
 -- SECTION 2: CORE ENTITIES 
 -- ============================================================================
-
--- -- Candidates 
--- CREATE TABLE `candidates` (
---     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
---     `candidate_code` VARCHAR(50) UNIQUE NOT NULL,
---     `candidate_name` VARCHAR(255) NOT NULL,
---     `email_id` VARCHAR(255) NOT NULL,
---     `alternate_email_id` VARCHAR(255),
---     `phone` VARCHAR(20) NOT NULL,
---     `phone_alternate` VARCHAR(20),
---     `linkedin` VARCHAR(255),
-
---     -- Basic information only
---   `current_location` VARCHAR(100), (dropdown list .. belgiunm, nedherlands, luxmberg, germany ,france , india default belgium)
---   `current_employer` VARCHAR(100),
---   `current_agency` VARCHAR(100),
---   `current_salary` DECIMAL(10,2),
---   `expected_salary` DECIMAL(10,2),
---   `notice_period` INT,
---   `can_join` DATE,
---   `current_daily_rate` DECIMAL(10,2),
---   `expected_daily_rate` DECIMAL(10,2),
---   `current_working_status` ENUM('Freelance(Self)', 'Freelance(Company)', 'Employee'),
---   'prof_summary' TEXT,
---     `skills` Json,
-
---   `languages` VARCHAR(255), (dropdown list .. france, dutch, germany, english default englisg)
---   `lead_type` ENUM('Cold', 'Warm', 'Hot', 'Blacklist'),
---   `lead_type_role` ENUM('payroll', 'recruitment', 'both','invoice'),
---   `work_authorization_status` INT,
---   `follow_up` ENUM('Done', 'Not Done'),
---   `follow_up_date` DATE,
---   `face_to_face` DATE,
---   `extra_details` TEXT,
---   `consent` VARCHAR(255),
---     -- Status workflow
---     `status` ENUM(
---         'new',          -- Just added
---         'screening',    -- Being reviewed
---         'qualified',    -- Ready for jobs
---         'active',       -- Has active submissions
---         'placed',       -- Successfully placed
---         'rejected',     -- Failed screening
---         'archived'      -- Inactive
---     ) DEFAULT 'new',
-    
---     -- Screening tracking
---     `screening_completed_at` TIMESTAMP NULL,
---     `screening_notes` TEXT,
-    
---     -- Assignment
---     `assigned_to` VARCHAR(50) COMMENT 'user_code',
-    
---     -- Resume
---   `candidate_cv` VARCHAR(255),
---   `consultancy_cv` VARCHAR(255),
-    
---     -- Activity counters (auto-updated)
---     `total_submissions` INT DEFAULT 0,
---     `total_interviews` INT DEFAULT 0,
---     `total_placements` INT DEFAULT 0,
-    
---     -- Notes
---     `notes` TEXT,
-    
---     -- Timestamps
---     `created_by` VARCHAR(50),
---     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
---     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
---     `deleted_at` TIMESTAMP NULL,
-    
---     INDEX `idx_code` (`candidate_code`),
---     INDEX `idx_email` (`email`),
---     INDEX `idx_status` (`status`),
---     INDEX `idx_assigned` (`assigned_to`),
---     INDEX `idx_status_screening` (`status`, `screening_completed_at`)
--- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
--- COMMENT='Candidate profiles storing';
-
--- -- Candidates Edit Info (existing)
--- CREATE TABLE IF NOT EXISTS `candidates_edit_info` (
---   `id` INT AUTO_INCREMENT PRIMARY KEY,
---   `candidate_code` VARCHAR(50) NOT NULL,
---   `column_id` INT,
---   `data` TEXT,
---   `edited_field` VARCHAR(100),
---   `old_value` TEXT,
---   `new_value` TEXT,
---   `edited_by` VARCHAR(50),
---   `edited_name` VARCHAR(100),
---   `edited_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
---   FOREIGN KEY (`candidate_code`) REFERENCES `candidates`(`candidate_code`) ON DELETE CASCADE
--- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- -- Work Authorization (existing) but table name is differnt work_auth)
--- CREATE TABLE IF NOT EXISTS `work_authorization` ( 
---   `id` INT AUTO_INCREMENT PRIMARY KEY,
---   `status` VARCHAR(100) NOT NULL
--- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- -- Technical Skills 
--- CREATE TABLE IF NOT EXISTS `technical_skills` (
---   `id` INT AUTO_INCREMENT PRIMARY KEY,
---   `skill` VARCHAR(100) NOT NULL
--- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-
 
 -- Clients 
 CREATE TABLE `clients` (
@@ -892,6 +773,42 @@ INSERT INTO `users` (`user_code`, `name`, `email`, `password`, `level`, `is_acti
 
 INSERT INTO `users` (`user_code`, `name`, `email`, `password`, `level`, `is_active`) VALUES
 ('USR01', 'Team User', 'user@test.com', 'user123', 'user', 1);
+
+
+-- Notifications table (for Notification.php class)
+CREATE TABLE IF NOT EXISTS `notifications` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `user_code` VARCHAR(50) NOT NULL,
+    `type` ENUM('info', 'success', 'warning', 'error') DEFAULT 'info',
+    `title` VARCHAR(255) NOT NULL,
+    `message` TEXT NOT NULL,
+    `link` VARCHAR(255) NULL,
+    `is_read` BOOLEAN DEFAULT 0,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `read_at` TIMESTAMP NULL,
+    FOREIGN KEY (`user_code`) REFERENCES `users`(`user_code`) ON DELETE CASCADE,
+    INDEX `idx_user_unread` (`user_code`, `is_read`),
+    INDEX `idx_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='User notifications for system events';
+
+-- Email Queue table (optional - for Mailer queue feature)
+CREATE TABLE IF NOT EXISTS `email_queue` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `to_email` VARCHAR(255) NOT NULL,
+    `subject` VARCHAR(255) NOT NULL,
+    `body` TEXT NOT NULL,
+    `template` VARCHAR(100) NULL,
+    `variables` JSON NULL,
+    `status` ENUM('pending', 'sent', 'failed') DEFAULT 'pending',
+    `attempts` INT DEFAULT 0,
+    `last_attempt_at` TIMESTAMP NULL,
+    `sent_at` TIMESTAMP NULL,
+    `error_message` TEXT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_status` (`status`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='Email queue for batch sending and retry logic';
 -- ============================================================================
 -- SECTION 7: AUTO-UPDATE TRIGGERS
 -- ============================================================================

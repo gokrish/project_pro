@@ -1,7 +1,6 @@
 <?php
 /**
  * Create Job Form
- * Fields: Client, Title, Description, Location, Salary, Show Salary, Assigned Recruiter, Notes
  */
 if (!defined('INCLUDED_FROM_INDEX')) {
     require_once __DIR__ . '/../_common.php';
@@ -106,7 +105,7 @@ require_once __DIR__ . '/../../includes/header.php';
                         <div class="col-md-6 mb-3">
                             <label class="form-label">Location</label>
                             <input type="text" name="location" class="form-control" 
-                                   value="Remote" placeholder="e.g., Brussels, Remote, Hybrid">
+                                   value="Belgium" placeholder="e.g., Belgium, Remote, Hybrid">
                         </div>
                         
                         <div class="col-md-6 mb-3">

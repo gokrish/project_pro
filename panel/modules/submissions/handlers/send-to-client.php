@@ -83,8 +83,32 @@ try {
         ]
     );
     
-    // TODO: Send email notification to client
-    // sendEmailNotification($submission, 'client_submission');
+    // // Get client contact emails
+    // $clientStmt = $conn->prepare("
+    //     SELECT cc.email, cc.name
+    //     FROM client_contacts cc
+    //     JOIN jobs j ON j.client_code = cc.client_code
+    //     JOIN submissions s ON s.job_code = j.job_code
+    //     WHERE s.submission_code = ? AND cc.is_primary = 1
+    // ");
+    // $clientStmt->bind_param("s", $submissionCode);
+    // $clientStmt->execute();
+    // $clientContacts = $clientStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+    // foreach ($clientContacts as $contact) {
+    //     Mailer::send(
+    //         $contact['email'],
+    //         "New Candidate Submitted: {$candidateName}",
+    //         'client_candidate_submission',
+    //         [
+    //             'client_contact_name' => $contact['name'],
+    //             'candidate_name' => $candidateName,
+    //             'job_title' => $jobTitle,
+    //             'candidate_summary' => $candidateSummary,
+    //             'cv_link' => $cvDownloadUrl
+    //         ]
+    //     );
+    // }
     
     redirectWithMessage(
         "/panel/modules/submissions/view.php?code={$submission_code}",

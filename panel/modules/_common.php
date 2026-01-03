@@ -205,41 +205,6 @@ $userEmail = $user['email'] ?? '';
 $userCode = $user['user_code'] ?? '';
 $userId = $user['id'] ?? null;
 
-// ============================================================================
-// DEV MODE BANNER (shows on all pages when active)
-// ============================================================================
-if (defined('DEV_MODE') && DEV_MODE === true && isset($_SESSION['dev_mode']) && $_SESSION['dev_mode'] === true) {
-    
-    // Only show banner if DEV_SHOW_BANNER is enabled
-    if (defined('DEV_SHOW_BANNER') && DEV_SHOW_BANNER === true) {
-        
-        // Register shutdown function to add banner at end of page
-        register_shutdown_function(function() use ($userName, $userLevel, $userCode) {
-            
-            // Don't show banner on AJAX requests
-            if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && 
-                strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
-                return;
-            }
-            
-            // Show banner
-            echo '<div id="dev-mode-banner" style="position: fixed; bottom: 20px; right: 20px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 15px 25px; border-radius: 12px; z-index: 999999; font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; box-shadow: 0 8px 24px rgba(0,0,0,0.3); border: 2px solid rgba(255,255,255,0.2); max-width: 300px;">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
-                    <div style="font-size: 16px; font-weight: bold;">🔧 DEV MODE</div>
-                    <button onclick="document.getElementById(\'dev-mode-banner\').style.display=\'none\'" style="background: none; border: none; color: white; cursor: pointer; font-size: 18px; padding: 0; margin-left: 10px; opacity: 0.8;">&times;</button>
-                </div>
-                <div style="font-size: 13px; line-height: 1.6; opacity: 0.95;">
-                    <strong>User:</strong> ' . htmlspecialchars($userName) . '<br>
-                    <strong>Code:</strong> ' . htmlspecialchars($userCode) . '<br>
-                    <strong>Level:</strong> <span style="background: rgba(255,255,255,0.2); padding: 2px 6px; border-radius: 3px; font-size: 11px;">' . htmlspecialchars($userLevel) . '</span>
-                </div>
-                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.3); font-size: 11px; opacity: 0.85;">
-                    Error Handler Active ✅
-                </div>
-            </div>';
-        });
-    }
-}
 
 // ============================================================================
 // HELPER FUNCTIONS (available globally)

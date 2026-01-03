@@ -100,7 +100,34 @@ try {
         ]
     );
     
-    // TODO: Notify recruiter
+    // Get submission details with recruiter info
+    $subStmt = $conn->prepare("
+        SELECT s.*, c.name as candidate_name, j.job_title,
+            u.email as recruiter_email, u.name as recruiter_name
+        FROM submissions s
+        JOIN candidates c ON s.candidate_code = c.candidate_code
+        JOIN jobs j ON s.job_code = j.job_code
+        JOIN users u ON s.submitted_by = u.user_code
+        WHERE s.submission_code = ?
+    ");
+    $subStmt->bind_param("s", $submissionCode);
+    $subStmt->execute();
+    $sub = $subStmt->get_result()->fetch_assoc();
+
+    // Send approval email
+    Mailer::send(
+        $sub['recruiter_email'],
+        "Submission Approved: {$sub['candidate_name']} for {$sub['job_title']}",
+        'submission_approved',
+        [
+            'recruiter_name' => $sub['recruiter_name'],
+            'candidate_name' => $sub['candidate_name'],
+            'job_title' => $sub['job_title'],
+            'approved_by' => Auth::user()['name'],
+            'approval_notes' => $_POST['approval_notes'] ?? '',
+            'submission_url' => BASE_URL . '/panel/modules/submissions/view.php?code=' . $submissionCode
+        ]
+    );
     
     redirectWithMessage(
         "/panel/modules/submissions/view.php?code={$submission_code}",

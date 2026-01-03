@@ -83,12 +83,12 @@ try {
     if ($oldClient['status'] !== $status) $changes['status'] = ['from' => $oldClient['status'], 'to' => $status];
     if ($oldClient['account_manager'] !== $account_manager) $changes['account_manager'] = ['from' => $oldClient['account_manager'], 'to' => $account_manager];
     
-    Logger::getInstance()->logActivity(
-        'update',
+    Logger::getInstance()->info(
         'clients',
-        $client_code,
-        "Client updated: {$company_name}",
-        ['changes' => $changes, 'updated_by' => $user['user_code']]
+        'update',
+        $clientCode,
+        "Client information updated",
+        ['fields_changed' => $changedFields]
     );
     
     redirectWithMessage(

@@ -100,7 +100,36 @@ try {
         ]
     );
     
-    // TODO: Send email notification to recruiter
+    // Get job details
+    $jobStmt = $conn->prepare("
+        SELECT j.*, u.email as recruiter_email, u.name as recruiter_name
+        FROM jobs j 
+        LEFT JOIN users u ON j.created_by = u.user_code
+        WHERE j.job_code = ?
+    ");
+    $jobStmt->bind_param("s", $jobCode);
+    $jobStmt->execute();
+    $job = $jobStmt->get_result()->fetch_assoc();
+
+    // Send email to recruiter
+    if (!empty($job['recruiter_email'])) {
+        Mailer::send(
+            $job['recruiter_email'],
+            "Job Approved: {$job['job_title']}",
+            'job_approved',
+            [
+                'recruiter_name' => $job['recruiter_name'],
+                'job_title' => $job['job_title'],
+                'job_code' => $job['job_code'],
+                'approved_by' => Auth::user()['name'],
+                'approved_at' => date('d/m/Y H:i'),
+                'approval_notes' => $_POST['approval_notes'] ?? '',
+                'job_url' => BASE_URL . '/panel/modules/jobs/view.php?code=' . $job['job_code']
+            ]
+        );
+    }
+
+    Logger::getInstance()->info('jobs', 'approve', $jobCode, "Job approved, recruiter notified");
     
     redirectWithMessage(
         "/panel/modules/jobs/?action=view&code={$job_code}",

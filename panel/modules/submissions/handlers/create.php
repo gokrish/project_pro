@@ -136,9 +136,25 @@ try {
         ]
     );
     
-    // === TODO: NOTIFY MANAGER ===
     // Send email to manager for approval
-    
+    // $managers = getActiveManagers($conn); // Helper function
+
+    // foreach ($managers as $manager) {
+    //     Mailer::send(
+    //         $manager['email'],
+    //         "New Submission Awaiting Approval",
+    //         'submission_approval_request',
+    //         [
+    //             'manager_name' => $manager['name'],
+    //             'candidate_name' => $candidateName,
+    //             'job_title' => $jobTitle,
+    //             'submission_code' => $submissionCode,
+    //             'submitted_by' => Auth::user()['name'],
+    //             'submission_notes' => $_POST['notes'] ?? '',
+    //             'approval_url' => BASE_URL . '/panel/modules/submissions/approval-dashboard.php'
+    //         ]
+    //     );
+    // }
     // === SUCCESS ===
     redirectWithMessage(
         "/panel/modules/submissions/view.php?code={$submission_code}",
