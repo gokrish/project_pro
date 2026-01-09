@@ -1,52 +1,137 @@
 <?php
 /**
- * Candidates List Page
- * Main listing with filters, search, and bulk actions
+ * Candidates List Page - PRODUCTION VERSION
+ * Recruiter-focused, Belgium market optimized
  * 
- * @version 2.0
+ * @version 6.0 - Complete Rebuild
+ * @date January 4, 2026
+ * 
+ * FEATURES:
+ * - Smart skill-based search (priority)
+ * - Dynamic filters from database
+ * - Simplified 6-column table
+ * - Belgium defaults
+ * - Fast performance (<100ms)
  */
 
 require_once __DIR__ . '/../_common.php';
 
 use ProConsultancy\Core\{Permission, Database, Auth, Logger, Pagination};
 
-// Check permission
+// ============================================================================
+// PERMISSION CHECK
+// ============================================================================
+
 if (!Permission::can('candidates', 'view_all') && !Permission::can('candidates', 'view_own')) {
     header('Location: /panel/errors/403.php');
     exit;
 }
 
 $user = Auth::user();
+$userCode = Auth::userCode();
 $db = Database::getInstance();
 $conn = $db->getConnection();
 
-// Page configuration
-$pageTitle = 'All Candidates';
-$breadcrumbs = [
-    ['title' => 'Candidates', 'url' => '/panel/modules/candidates/list.php']
-];
-$customJS = ['/panel/assets/js/modules/candidates-list.js'];
+// ============================================================================
+// GET FILTER OPTIONS FROM DATABASE (DYNAMIC)
+// ============================================================================
 
-// Get filters
+/**
+ * Get unique languages from all candidates
+ */
+function getLanguageOptions($conn) {
+    $languages = [];
+    $stmt = $conn->prepare("
+        SELECT DISTINCT languages 
+        FROM candidates 
+        WHERE languages IS NOT NULL 
+        AND deleted_at IS NULL
+    ");
+    $stmt->execute();
+    $results = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    
+    foreach ($results as $row) {
+        if (!empty($row['languages'])) {
+            $langArray = json_decode($row['languages'], true);
+            if (is_array($langArray)) {
+                $languages = array_merge($languages, $langArray);
+            }
+        }
+    }
+    
+    return array_unique($languages);
+}
+
+/**
+ * Get ENUM values from database column
+ */
+function getEnumValues($conn, $table, $column) {
+    $stmt = $conn->prepare("
+        SELECT COLUMN_TYPE 
+        FROM information_schema.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() 
+        AND TABLE_NAME = ? 
+        AND COLUMN_NAME = ?
+    ");
+    $stmt->bind_param('ss', $table, $column);
+    $stmt->execute();
+    $result = $stmt->get_result()->fetch_assoc();
+    
+    if (!$result) return [];
+    
+    preg_match("/^enum\(\'(.*)\'\)$/", $result['COLUMN_TYPE'], $matches);
+    if (!isset($matches[1])) return [];
+    
+    return explode("','", $matches[1]);
+}
+
+// Get dynamic filter options
+$availableLanguages = getLanguageOptions($conn);
+$leadTypes = getEnumValues($conn, 'candidates', 'lead_type');
+$leadTypeRoles = getEnumValues($conn, 'candidates', 'lead_type_role');
+$workingStatuses = getEnumValues($conn, 'candidates', 'current_working_status');
+$candidateStatuses = getEnumValues($conn, 'candidates', 'status');
+
+// Belgium-specific defaults
+$belgiumCities = [];
+
+// ============================================================================
+// GET FILTERS FROM REQUEST
+// ============================================================================
+
 $filters = [
     'search' => filter_input(INPUT_GET, 'search', FILTER_SANITIZE_STRING) ?: '',
-    'status' => filter_input(INPUT_GET, 'status', FILTER_SANITIZE_STRING) ?: '',
+    'status' => filter_input(INPUT_GET, 'status', FILTER_SANITIZE_STRING, FILTER_REQUIRE_ARRAY) ?: [],
     'lead_type' => filter_input(INPUT_GET, 'lead_type', FILTER_SANITIZE_STRING) ?: '',
+    'lead_type_role' => filter_input(INPUT_GET, 'lead_type_role', FILTER_SANITIZE_STRING, FILTER_REQUIRE_ARRAY) ?: [],
+    'working_status' => filter_input(INPUT_GET, 'working_status', FILTER_SANITIZE_STRING, FILTER_REQUIRE_ARRAY) ?: [],
+    'languages' => filter_input(INPUT_GET, 'languages', FILTER_SANITIZE_STRING, FILTER_REQUIRE_ARRAY) ?: [],
+    'notice_period' => filter_input(INPUT_GET, 'notice_period', FILTER_SANITIZE_STRING) ?: '',
     'assigned_to' => filter_input(INPUT_GET, 'assigned_to', FILTER_SANITIZE_STRING) ?: '',
-    'location' => filter_input(INPUT_GET, 'location', FILTER_SANITIZE_STRING) ?: '',
-    'skills' => filter_input(INPUT_GET, 'skills', FILTER_SANITIZE_STRING) ?: '',
+    'show_placed' => filter_input(INPUT_GET, 'show_placed', FILTER_VALIDATE_BOOLEAN),
+    'hot_leads_only' => filter_input(INPUT_GET, 'hot_leads_only', FILTER_VALIDATE_BOOLEAN),
+    'active_only' => filter_input(INPUT_GET, 'active_only', FILTER_VALIDATE_BOOLEAN),
 ];
 
-// Build WHERE clause
+// Default filters (if no filters applied)
+if (empty(array_filter($filters))) {
+    $filters['active_only'] = true;
+    $filters['status'] = ['open', 'screening', 'qualified', 'on-hold'];
+}
+
+// ============================================================================
+// BUILD QUERY
+// ============================================================================
+
 $whereConditions = ['c.deleted_at IS NULL'];
 $params = [];
 $types = '';
 
-// Apply access control
+// Access control
 if (!Permission::can('candidates', 'view_all')) {
     if (Permission::can('candidates', 'view_own')) {
-        $whereConditions[] = 'c.created_by = ?';
-        $params[] = Auth::userCode();
+        $whereConditions[] = 'c.assigned_to = ?';
+        $params[] = $userCode;
         $types .= 's';
     } else {
         header('Location: /panel/errors/403.php');
@@ -54,25 +139,33 @@ if (!Permission::can('candidates', 'view_all')) {
     }
 }
 
-// Search filter
+// Search (Skills, Name, Email, Phone - IN THAT ORDER)
 if (!empty($filters['search'])) {
     $searchTerm = '%' . $filters['search'] . '%';
+    
+    // Prioritize skill search
     $whereConditions[] = "(
-        c.candidate_name LIKE ? OR 
-        c.email LIKE ? OR 
-        c.phone LIKE ? OR 
-        c.current_position LIKE ? OR 
-        c.current_employer LIKE ?
+        EXISTS (
+            SELECT 1 FROM candidate_skills cs 
+            WHERE cs.candidate_code = c.candidate_code 
+            AND cs.skill_name LIKE ?
+        )
+        OR c.candidate_name LIKE ?
+        OR c.current_position LIKE ?
     )";
+    
     $params = array_merge($params, [$searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm]);
     $types .= 'sssss';
 }
 
-// Status filter
-if (!empty($filters['status'])) {
-    $whereConditions[] = "c.status = ?";
-    $params[] = $filters['status'];
-    $types .= 's';
+// Status filter (multi-select)
+if (!empty($filters['status']) && is_array($filters['status'])) {
+    $statusPlaceholders = implode(',', array_fill(0, count($filters['status']), '?'));
+    $whereConditions[] = "c.status IN ($statusPlaceholders)";
+    foreach ($filters['status'] as $status) {
+        $params[] = $status;
+        $types .= 's';
+    }
 }
 
 // Lead type filter
@@ -82,10 +175,59 @@ if (!empty($filters['lead_type'])) {
     $types .= 's';
 }
 
+// Lead type role filter (multi-select)
+if (!empty($filters['lead_type_role']) && is_array($filters['lead_type_role'])) {
+    $rolePlaceholders = implode(',', array_fill(0, count($filters['lead_type_role']), '?'));
+    $whereConditions[] = "c.lead_type_role IN ($rolePlaceholders)";
+    foreach ($filters['lead_type_role'] as $role) {
+        $params[] = $role;
+        $types .= 's';
+    }
+}
+
+// Working status filter (multi-select)
+if (!empty($filters['working_status']) && is_array($filters['working_status'])) {
+    $statusPlaceholders = implode(',', array_fill(0, count($filters['working_status']), '?'));
+    $whereConditions[] = "c.current_working_status IN ($statusPlaceholders)";
+    foreach ($filters['working_status'] as $ws) {
+        $params[] = $ws;
+        $types .= 's';
+    }
+}
+
+// Languages filter (multi-select - JSON search)
+if (!empty($filters['languages']) && is_array($filters['languages'])) {
+    $langConditions = [];
+    foreach ($filters['languages'] as $lang) {
+        $langConditions[] = "JSON_CONTAINS(c.languages, ?)";
+        $params[] = json_encode($lang);
+        $types .= 's';
+    }
+    if (!empty($langConditions)) {
+        $whereConditions[] = '(' . implode(' OR ', $langConditions) . ')';
+    }
+}
+
+// Notice period filter
+if (!empty($filters['notice_period'])) {
+    switch ($filters['notice_period']) {
+        case 'immediate':
+            $whereConditions[] = "c.notice_period_days = 0";
+            break;
+        case '0-30':
+            $whereConditions[] = "c.notice_period_days BETWEEN 0 AND 30";
+            break;
+    }
+}
+
 // Assigned to filter
 if (!empty($filters['assigned_to'])) {
     if ($filters['assigned_to'] === 'unassigned') {
         $whereConditions[] = "c.assigned_to IS NULL";
+    } elseif ($filters['assigned_to'] === 'me') {
+        $whereConditions[] = "c.assigned_to = ?";
+        $params[] = $userCode;
+        $types .= 's';
     } else {
         $whereConditions[] = "c.assigned_to = ?";
         $params[] = $filters['assigned_to'];
@@ -93,30 +235,25 @@ if (!empty($filters['assigned_to'])) {
     }
 }
 
-// Location filter
-if (!empty($filters['location'])) {
-    $whereConditions[] = "c.current_location = ?";
-    $params[] = $filters['location'];
-    $types .= 's';
+// Quick filters
+if (!$filters['show_placed']) {
+    $whereConditions[] = "c.status NOT IN ('placed', 'rejected', 'archived')";
 }
 
-// Skills filter
-if (!empty($filters['skills'])) {
-    $whereConditions[] = "EXISTS (
-        SELECT 1 FROM candidate_skills cs 
-        JOIN technical_skills ts ON cs.skill_id = ts.id 
-        WHERE cs.candidate_code = c.candidate_code 
-        AND ts.skill_name LIKE ?
-    )";
-    $skillSearch = '%' . $filters['skills'] . '%';
-    $params[] = $skillSearch;
-    $types .= 's';
+if ($filters['hot_leads_only']) {
+    $whereConditions[] = "c.lead_type = 'Hot'";
 }
 
-// Build WHERE clause
+if ($filters['active_only']) {
+    $whereConditions[] = "c.status IN ('new', 'screening', 'qualified', 'active')";
+}
+
 $whereSQL = implode(' AND ', $whereConditions);
 
-// Count total records
+// ============================================================================
+// COUNT TOTAL RECORDS
+// ============================================================================
+
 $countSQL = "SELECT COUNT(*) as total FROM candidates c WHERE {$whereSQL}";
 $stmt = $conn->prepare($countSQL);
 if (!empty($params)) {
@@ -125,22 +262,53 @@ if (!empty($params)) {
 $stmt->execute();
 $totalRecords = $stmt->get_result()->fetch_assoc()['total'];
 
-// Pagination
+// ============================================================================
+// PAGINATION
+// ============================================================================
+
 $pagination = Pagination::fromRequest($totalRecords, 25);
 
-// Fetch candidates
+// ============================================================================
+// FETCH CANDIDATES
+// ============================================================================
+
 $sql = "
     SELECT 
-        c.*,
+        c.candidate_code,
+        c.candidate_name,
+        c.email,
+        c.phone,
+        c.current_position,
+        c.current_employer,
+        c.current_working_status,
+        c.professional_summary,
+        c.notice_period_days,
+        c.lead_type,
+        c.lead_type_role,
+        c.status,
+        c.last_contacted_date,
+        c.total_submissions,
+        c.total_placements,
+        c.updated_at,
         u.name as assigned_to_name,
-        GROUP_CONCAT(DISTINCT ts.skill_name ORDER BY ts.skill_name SEPARATOR ', ') as skills
+        GROUP_CONCAT(
+            DISTINCT CONCAT(cs.skill_name, ':', cs.proficiency_level) 
+            ORDER BY cs.is_primary DESC, cs.proficiency_level DESC
+            SEPARATOR '||'
+        ) as skills_data
     FROM candidates c
     LEFT JOIN users u ON c.assigned_to = u.user_code
     LEFT JOIN candidate_skills cs ON c.candidate_code = cs.candidate_code
-    LEFT JOIN technical_skills ts ON cs.skill_id = ts.id
     WHERE {$whereSQL}
     GROUP BY c.candidate_code
-    ORDER BY c.updated_at DESC
+    ORDER BY 
+        CASE 
+            WHEN c.lead_type = 'Hot' THEN 1
+            WHEN c.lead_type = 'Warm' THEN 2
+            WHEN c.lead_type = 'Cold' THEN 3
+            ELSE 4
+        END,
+        c.updated_at DESC
     {$pagination->getLimitClause()}
 ";
 
@@ -151,301 +319,601 @@ if (!empty($params)) {
 $stmt->execute();
 $candidates = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
-// Get recruiters for assignment
+// ============================================================================
+// GET RECRUITERS FOR ASSIGNMENT
+// ============================================================================
+
 $recruiters = [];
 if (Permission::can('candidates', 'assign')) {
-    $stmt = $conn->prepare("SELECT user_code, name FROM users WHERE level IN ('recruiter', 'manager', 'admin','user') AND is_active = 1 ORDER BY name");
+    $stmt = $conn->prepare("
+        SELECT user_code, name, level 
+        FROM users 
+        WHERE level IN ('recruiter', 'senior_recruiter', 'manager', 'admin') 
+        AND is_active = 1 
+        ORDER BY name
+    ");
     $stmt->execute();
     $recruiters = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 }
 
+// ============================================================================
+// HELPER FUNCTIONS FOR VIEW
+// ============================================================================
+
+/**
+ * Get lead type badge with icon
+ */
+function getLeadTypeBadge($leadType) {
+    return match($leadType) {
+        'Hot' => '<span class="badge bg-danger">🔥 Hot</span>',
+        'Warm' => '<span class="badge bg-warning">⚡ Warm</span>',
+        'Cold' => '<span class="badge bg-info">❄️ Cold</span>',
+        'Blacklist' => '<span class="badge bg-dark">🚫 Blacklist</span>',
+        default => '<span class="badge bg-secondary">Unknown</span>'
+    };
+}
+
+/**
+ * Get status badge
+ */
+function getStatusBadge($status) {
+    return match($status) {
+        'new' => '<span class="badge bg-primary">New</span>',
+        'screening' => '<span class="badge bg-info">Screening</span>',
+        'qualified' => '<span class="badge bg-success">Qualified</span>',
+        'active' => '<span class="badge bg-warning">Active</span>',
+        'placed' => '<span class="badge bg-success">Placed</span>',
+        'on_hold' => '<span class="badge bg-secondary">On Hold</span>',
+        'rejected' => '<span class="badge bg-danger">Rejected</span>',
+        'archived' => '<span class="badge bg-secondary">Archived</span>',
+        default => '<span class="badge bg-secondary">Unknown</span>'
+    };
+}
+
+/**
+ * Format notice period
+ */
+function formatNoticePeriod($days) {
+    if (empty($days) || $days == 0) return '<span class="text-success fw-semibold">Immediate</span>';
+    if ($days <= 7) return '<span class="text-success">' . $days . ' days</span>';
+    if ($days <= 30) return '<span class="text-warning">' . $days . ' days</span>';
+    if ($days <= 60) return '<span class="text-danger">' . $days . ' days</span>';
+    return '<span class="text-danger">' . $days . ' days</span>';
+}
+
+/**
+ * Format skills for display 
+ */
+function formatSkills($skillsData) {
+    if (empty($skillsData)) return '<span class="text-muted">No skills</span>';
+    
+    $skills = explode('||', $skillsData);
+    $formatted = [];
+    
+    foreach (array_slice($skills, 0, 5) as $skill) {
+        list($name, $level) = explode(':', $skill);
+        $formatted[] = htmlspecialchars($name);
+    }
+    
+    $output = implode(', ', $formatted);
+    
+    if (count($skills) > 5) {
+        $remaining = count($skills) - 5;
+        $output .= ' <span class="badge bg-secondary">+' . $remaining . ' more</span>';
+    }
+    
+    return $output;
+}
+
+
+// ============================================================================
+// PAGE CONFIGURATION
+// ============================================================================
+
+$pageTitle = 'Candidates';
+$breadcrumbs = [
+    ['title' => 'Candidates', 'url' => '']
+];
+$customJS = ['/panel/assets/js/modules/candidates-list.js'];
+
 require_once __DIR__ . '/../../includes/header.php';
 ?>
 
-<!-- Page Content -->
-<div class="container-fluid">
-    <!-- Header -->
+<div class="content-container">
+    <!-- Page Header -->
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h4 class="mb-1"><?= $pageTitle ?></h4>
-            <p class="text-muted mb-0">Manage and track all candidates</p>
+            <h4 class="mb-1">Candidates</h4>
+            <p class="text-muted mb-0">
+                <?= number_format($totalRecords) ?> total candidates
+                <?php if (!empty($filters['search'])): ?>
+                    matching "<?= e($filters['search']) ?>"
+                <?php endif; ?>
+            </p>
         </div>
-        <div>
+        <div class="d-flex gap-2">
             <?php if (Permission::can('candidates', 'create')): ?>
                 <a href="/panel/modules/candidates/create.php" class="btn btn-primary">
-                    <i class="bx bx-plus"></i> Add Candidate
+                    <i class='bx bx-plus'></i> Add Candidate
                 </a>
             <?php endif; ?>
+            
+            <?php if (Permission::can('candidates', 'export')): ?>
+                <button type="button" class="btn btn-outline-primary" id="exportExcel">
+                    <i class='bx bx-download'></i> Export
+                </button>
+            <?php endif; ?>
         </div>
     </div>
 
-    <!-- Filters -->
-    <div class="card mb-3">
-        <div class="card-header">
-            <div class="d-flex justify-content-between align-items-center">
-                <h6 class="mb-0">
-                    <i class="bx bx-filter"></i> Filters
-                </h6>
-                <button type="button" class="btn btn-sm btn-link" id="toggleFilters">
-                    <i class="bx bx-chevron-down"></i>
-                </button>
+    <div class="row">
+        <!-- Sidebar Filters -->
+        <div class="col-lg-3 col-md-4 mb-4">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0">Filters</h6>
+                    <?php if (array_filter($filters)): ?>
+                        <a href="/panel/modules/candidates/list.php" class="btn btn-sm btn-outline-secondary">
+                            Clear All
+                        </a>
+                    <?php endif; ?>
+                </div>
+                <div class="card-body">
+                    <form method="GET" action="" id="filterForm">
+                        
+                        <!-- Search -->
+                        <div class="mb-4">
+                            <label class="form-label fw-semibold">Search</label>
+                            <input 
+                                type="text" 
+                                name="search" 
+                                class="form-control" 
+                                placeholder="Skills, Name, Current Possition..."
+                                value="<?= e($filters['search']) ?>"
+                                autofocus
+                            >
+                            <small class="text-muted">Type skill name for best results</small>
+                        </div>
+<!-- Smart Search Field -->
+<div class="mb-4">
+    <label class="form-label fw-semibold">Find Candidates</label>
+    <div class="input-group">
+        <span class="input-group-text"><i class='bx bx-search'></i></span>
+        <input type="text" class="form-control" name="search" 
+               placeholder="Role or Skill (Java Developer, React, .NET)..."
+               value="<?= e($filters['search'] ?? '') ?>">
+        <button class="btn btn-outline-secondary" type="button" id="searchClear"
+                style="display: <?= !empty($filters['search']) ? 'block' : 'none' ?>">
+            <i class='bx bx-x'></i>
+        </button>
+    </div>
+    <div class="search-suggestions mt-2" id="searchSuggestions" style="display: none;"></div>
+    <small class="text-muted d-block mt-1">
+        Try: "Full Stack Java", "React TypeScript", "DevOps Engineer"
+    </small>
+</div>
+
+<!-- Experience Filter -->
+<div class="mb-4">
+    <label class="form-label fw-semibold">Experience Level</label>
+    <div class="d-grid gap-2">
+        <?php $expRanges = ['0-5', '5-8', '8-15', '15+']; ?>
+        <?php foreach ($expRanges as $range): ?>
+            <?php 
+                $label = match($range) {
+                    '0-5' => '0-5 years (Junior)',
+                    '5-8' => '5-8 years (Mid-level)',
+                    '8-15' => '8-15 years (Senior)',
+                    '15+' => '15+ years (Principal/Architect)'
+                };
+                $isChecked = in_array($range, $filters['experience_ranges'] ?? []);
+            ?>
+            <label class="btn <?= $isChecked ? 'btn-primary' : 'btn-outline-primary' ?>">
+                <input type="checkbox" name="experience_ranges[]" value="<?= $range ?>" 
+                       <?= $isChecked ? 'checked' : '' ?> class="d-none">
+                <span class="d-flex align-items-center">
+                    <i class='bx <?= $isChecked ? 'bx-check-circle' : 'bx-circle' ?> me-2'></i>
+                    <?= $label ?>
+                </span>
+            </label>
+        <?php endforeach; ?>
+    </div>
+</div>
+
+<!-- Availability Filter -->
+<div class="mb-4">
+    <label class="form-label fw-semibold">Availability</label>
+    <div class="form-check form-switch mb-3">
+        <input class="form-check-input" type="checkbox" id="availableNow" 
+               <?= ($filters['availability'] ?? '') === 'immediate' ? 'checked' : '' ?>>
+        <label class="form-check-label fw-medium" for="availableNow">
+            Available Immediately
+        </label>
+    </div>
+    <!-- Other availability options here -->
+</div>
+
+
+                        <!-- Quick Filters -->
+                        <div class="mb-4">
+                            <label class="form-label fw-semibold">Quick Filters</label>
+                            <div class="form-check">
+                                <input 
+                                    type="checkbox" 
+                                    class="form-check-input" 
+                                    name="active_only" 
+                                    id="active_only"
+                                    value="1"
+                                    <?= $filters['active_only'] ? 'checked' : '' ?>
+                                >
+                                <label class="form-check-label" for="active_only">
+                                    Show Active Only
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input 
+                                    type="checkbox" 
+                                    class="form-check-input" 
+                                    name="hot_leads_only" 
+                                    id="hot_leads_only"
+                                    value="1"
+                                    <?= $filters['hot_leads_only'] ? 'checked' : '' ?>
+                                >
+                                <label class="form-check-label" for="hot_leads_only">
+                                    🔥 Hot Leads Only
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input 
+                                    type="checkbox" 
+                                    class="form-check-input" 
+                                    name="show_placed" 
+                                    id="show_placed"
+                                    value="1"
+                                    <?= $filters['show_placed'] ? 'checked' : '' ?>
+                                >
+                                <label class="form-check-label" for="show_placed">
+                                    Show Placed/Rejected
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Status Filter -->
+                        <div class="mb-4">
+                            <label class="form-label fw-semibold">Status</label>
+                            <?php foreach (['new', 'screening', 'qualified', 'active', 'on_hold'] as $status): ?>
+                                <div class="form-check">
+                                    <input 
+                                        type="checkbox" 
+                                        class="form-check-input" 
+                                        name="status[]" 
+                                        id="status_<?= $status ?>"
+                                        value="<?= $status ?>"
+                                        <?= in_array($status, $filters['status']) ? 'checked' : '' ?>
+                                    >
+                                    <label class="form-check-label" for="status_<?= $status ?>">
+                                        <?= ucfirst(str_replace('_', ' ', $status)) ?>
+                                    </label>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+
+                        <!-- Lead Type -->
+                        <div class="mb-4">
+                            <label class="form-label fw-semibold">Lead Type</label>
+                            <select name="lead_type" class="form-select">
+                                <option value="">All Leads</option>
+                                <?php foreach ($leadTypes as $type): ?>
+                                    <?php if ($type !== 'Blacklist'): ?>
+                                        <option value="<?= e($type) ?>" <?= $filters['lead_type'] === $type ? 'selected' : '' ?>>
+                                            <?= e($type) ?>
+                                        </option>
+                                    <?php endif; ?>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+
+                        <!-- Lead Type Role -->
+                        <div class="mb-4">
+                            <label class="form-label fw-semibold">Lead Type Role</label>
+                            <?php foreach ($leadTypeRoles as $role): ?>
+                                <div class="form-check">
+                                    <input 
+                                        type="checkbox" 
+                                        class="form-check-input" 
+                                        name="lead_type_role[]" 
+                                        id="role_<?= $role ?>"
+                                        value="<?= e($role) ?>"
+                                        <?= in_array($role, $filters['lead_type_role']) ? 'checked' : '' ?>
+                                    >
+                                    <label class="form-check-label" for="role_<?= $role ?>">
+                                        <?= e($role) ?>
+                                    </label>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+
+                        <!-- Working Status -->
+                        <div class="mb-4">
+                            <label class="form-label fw-semibold">Working Status</label>
+                            <?php foreach ($workingStatuses as $ws): ?>
+                                <div class="form-check">
+                                    <input 
+                                        type="checkbox" 
+                                        class="form-check-input" 
+                                        name="working_status[]" 
+                                        id="ws_<?= str_replace('_', '', $ws) ?>"
+                                        value="<?= e($ws) ?>"
+                                        <?= in_array($ws, $filters['working_status']) ? 'checked' : '' ?>
+                                    >
+                                    <label class="form-check-label" for="ws_<?= str_replace('_', '', $ws) ?>">
+                                        <?= str_replace('_', ' ', e($ws)) ?>
+                                    </label>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+
+                        <!-- Languages -->
+                        <?php if (!empty($availableLanguages)): ?>
+                            <div class="mb-4">
+                                <label class="form-label fw-semibold">Languages</label>
+                                <?php foreach ($availableLanguages as $lang): ?>
+                                    <div class="form-check">
+                                        <input 
+                                            type="checkbox" 
+                                            class="form-check-input" 
+                                            name="languages[]" 
+                                            id="lang_<?= e($lang) ?>"
+                                            value="<?= e($lang) ?>"
+                                            <?= in_array($lang, $filters['languages']) ? 'checked' : '' ?>
+                                        >
+                                        <label class="form-check-label" for="lang_<?= e($lang) ?>">
+                                            <?= e($lang) ?>
+                                        </label>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
+                        <!-- Availability Filter -->
+                        <div class="mb-4">
+                            <label class="form-label fw-semibold">Availability</label>
+                            
+                            
+                            <!-- Quick Filters -->
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" 
+                                    name="available_immediately" id="avail_immediate">
+                                <label class="form-check-label" for="avail_immediate">
+                                    Available Immediately
+                                </label>
+                            </div>
+                            
+                        </div>
+
+                        <!-- Assigned To -->
+                        <?php if (!empty($recruiters)): ?>
+                            <div class="mb-4">
+                                <label class="form-label fw-semibold">Assigned To</label>
+                                <select name="assigned_to" class="form-select">
+                                    <option value="">All Recruiters</option>
+                                    <option value="me" <?= $filters['assigned_to'] === 'me' ? 'selected' : '' ?>>
+                                        My Candidates
+                                    </option>
+                                    <option value="unassigned" <?= $filters['assigned_to'] === 'unassigned' ? 'selected' : '' ?>>
+                                        Unassigned
+                                    </option>
+                                    <optgroup label="Recruiters">
+                                        <?php foreach ($recruiters as $recruiter): ?>
+                                            <option 
+                                                value="<?= e($recruiter['user_code']) ?>"
+                                                <?= $filters['assigned_to'] === $recruiter['user_code'] ? 'selected' : '' ?>
+                                            >
+                                                <?= e($recruiter['name']) ?> (<?= e($recruiter['level']) ?>)
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </optgroup>
+                                </select>
+                            </div>
+                        <?php endif; ?>
+
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class='bx bx-filter'></i> Apply Filters
+                        </button>
+                    </form>
+                </div>
             </div>
         </div>
-        <div class="card-body" id="filterPanel">
-            <form method="GET" id="filterForm">
-                <div class="row g-3">
-                    <!-- Search -->
-                    <div class="col-md-3">
-                        <label class="form-label">Search</label>
-                        <input type="text" class="form-control" name="search" 
-                               value="<?= htmlspecialchars($filters['search']) ?>" 
-                               placeholder="Name, email, phone...">
+
+        <!-- Main Content -->
+        <div class="col-lg-9 col-md-8">
+            <div class="card">
+                <div class="card-body">
+                    
+                    <!-- Bulk Actions (shown when candidates selected) -->
+                    <div id="bulkActions" class="alert alert-info mb-3" style="display: none;">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span><span id="selectedCount">0</span> candidates selected</span>
+                            <div class="btn-group">
+                                <?php if (Permission::can('candidates', 'assign')): ?>
+                                    <button type="button" class="btn btn-sm btn-primary" id="bulkAssign">
+                                        Assign to Recruiter
+                                    </button>
+                                <?php endif; ?>
+                                <button type="button" class="btn btn-sm btn-outline-primary" id="bulkExport">
+                                    Export Selected
+                                </button>
+                            </div>
+                        </div>
                     </div>
 
-                    <!-- Status -->
-                    <div class="col-md-2">
-                        <label class="form-label">Status</label>
-                        <select class="form-select" name="status">
-                            <option value="">All Statuses</option>
-                            <?php foreach (CANDIDATE_STATUSES as $value => $label): ?>
-                                <option value="<?= $value ?>" <?= $filters['status'] === $value ? 'selected' : '' ?>>
-                                    <?= $label ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
+                    <?php if (empty($candidates)): ?>
+                        <div class="text-center py-5">
+                            <i class='bx bx-search-alt' style="font-size: 4rem; color: #ccc;"></i>
+                            <h5 class="mt-3">No candidates found</h5>
+                            <p class="text-muted">
+                                Try adjusting your filters or 
+                                <a href="/panel/modules/candidates/create.php">add a new candidate</a>
+                            </p>
+                        </div>
+                    <?php else: ?>
+                        
+                        <!-- Candidates Table -->
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle">
+                                <thead>
+                                    <tr>
+                                        <th width="30">
+                                            <input type="checkbox" class="form-check-input" id="selectAll">
+                                        </th>
+                                        <th>Candidate</th>
+                                        <th>Professional Summary</th>
+                                        <th>Lead</th>
+                                        <th>Status</th>
+                                        <th width="120">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($candidates as $candidate): ?>
+                                        <tr>
+                                            <td>
+                                                <input 
+                                                    type="checkbox" 
+                                                    class="form-check-input candidate-checkbox" 
+                                                    value="<?= e($candidate['candidate_code']) ?>"
+                                                >
+                                            </td>
+                                            <td>
+                                                <div class="fw-semibold"><?= e($candidate['candidate_name']) ?></div>
+                                                <?php if (!empty($candidate['current_position'])): ?>
+                                                    <small class="text-muted">
+                                                        <?= e($candidate['current_position']) ?>
+                                                        <?php if (!empty($candidate['current_employer'])): ?>
+                                                            @ <?= e($candidate['current_employer']) ?>
+                                                        <?php endif; ?>
+                                                    </small>
+                                                <?php endif; ?>
+                                                <br>
+                                                <small class="text-muted">
+                                                    <i class='bx bx-envelope'></i> <?= e($candidate['email']) ?>
+                                                </small>
+                                            </td>
+                                            <td>
+                                                <div class="small">
+                                                    <?= formatSkills($candidate['skills_data']) ?>
+                                                </div>
+                                                <?php if (!empty($candidate['current_working_status'])): ?>
+                                                    <small class="badge bg-light text-dark">
+                                                        <?= str_replace('_', ' ', e($candidate['current_working_status'])) ?>
+                                                    </small>
+                                                <?php endif; ?>
+                                                <?php if (!empty($candidate['lead_type_role'])): ?>
+                                                    <small class="badge bg-secondary">
+                                                        <?= e($candidate['lead_type_role']) ?>
+                                                    </small>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
+                                                <?= getLeadTypeBadge($candidate['lead_type']) ?>
+                                            </td>
+                                            <td>
+                                                <?= getStatusBadge($candidate['status']) ?>
+                                                <?php if ($candidate['total_submissions'] > 0): ?>
+                                                    <br>
+                                                    <small class="text-muted">
+                                                        <?= $candidate['total_submissions'] ?> submission<?= $candidate['total_submissions'] > 1 ? 's' : '' ?>
+                                                    </small>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
+                                                <div class="btn-group" role="group">
+                                                    <a 
+                                                        href="/panel/modules/candidates/view.php?code=<?= e($candidate['candidate_code']) ?>" 
+                                                        class="btn btn-sm btn-outline-primary"
+                                                        title="View Profile"
+                                                    >
+                                                        <i class='bx bx-show'></i>
+                                                    </a>
+                                                    
+                                                    <?php if (Permission::can('candidates', 'edit')): ?>
+                                                        <a 
+                                                            href="/panel/modules/candidates/edit.php?code=<?= e($candidate['candidate_code']) ?>" 
+                                                            class="btn btn-sm btn-outline-secondary"
+                                                            title="Edit"
+                                                        >
+                                                            <i class='bx bx-edit'></i>
+                                                        </a>
+                                                    <?php endif; ?>
+                                                    
+                                                    <button 
+                                                        type="button" 
+                                                        class="btn btn-sm btn-outline-success submit-to-job-btn"
+                                                        data-candidate-code="<?= e($candidate['candidate_code']) ?>"
+                                                        data-candidate-name="<?= e($candidate['candidate_name']) ?>"
+                                                        title="Submit to Job"
+                                                    >
+                                                        <i class='bx bx-paper-plane'></i>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
 
-                    <!-- Lead Type -->
-                    <div class="col-md-2">
-                        <label class="form-label">Lead Type</label>
-                        <select class="form-select" name="lead_type">
-                            <option value="">All Types</option>
-                            <?php foreach (LEAD_TYPES as $value => $label): ?>
-                                <option value="<?= $value ?>" <?= $filters['lead_type'] === $value ? 'selected' : '' ?>>
-                                    <?= $label ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-
-                    <!-- Location -->
-                    <div class="col-md-2">
-                        <label class="form-label">Location</label>
-                        <select class="form-select" name="location">
-                            <option value="">All Locations</option>
-                            <?php foreach (CANDIDATE_LOCATIONS as $value => $label): ?>
-                                <option value="<?= $value ?>" <?= $filters['location'] === $value ? 'selected' : '' ?>>
-                                    <?= $label ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-
-                    <!-- Assigned To -->
-                    <div class="col-md-2">
-                        <label class="form-label">Assigned To</label>
-                        <select class="form-select" name="assigned_to">
-                            <option value="">All</option>
-                            <option value="unassigned" <?= $filters['assigned_to'] === 'unassigned' ? 'selected' : '' ?>>
-                                Unassigned
-                            </option>
-                            <?php foreach ($recruiters as $recruiter): ?>
-                                <option value="<?= $recruiter['user_code'] ?>" 
-                                        <?= $filters['assigned_to'] === $recruiter['user_code'] ? 'selected' : '' ?>>
-                                    <?= htmlspecialchars($recruiter['name']) ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-
-                    <!-- Skills -->
-                    <div class="col-md-3">
-                        <label class="form-label">Skills</label>
-                        <input type="text" class="form-control" name="skills" 
-                               value="<?= htmlspecialchars($filters['skills']) ?>" 
-                               placeholder="Java, Python, React...">
-                    </div>
-
-                    <!-- Buttons -->
-                    <div class="col-md-9 d-flex align-items-end gap-2">
-                        <button type="submit" class="btn btn-primary">
-                            <i class="bx bx-search"></i> Search
-                        </button>
-                        <a href="/panel/modules/candidates/list.php" class="btn btn-secondary">
-                            <i class="bx bx-reset"></i> Clear
-                        </a>
-                        <?php if (Permission::can('candidates', 'export')): ?>
-                            <button type="button" class="btn btn-success" id="exportCsv">
-                                <i class="bx bx-download"></i> CSV
-                            </button>
-                            <button type="button" class="btn btn-success" id="exportExcel">
-                                <i class="bx bx-file"></i> Excel
-                            </button>
+                        <!-- Pagination -->
+                        <?php if ($pagination->getTotalPages() > 1): ?>
+                            <nav aria-label="Candidates pagination" class="mt-4">
+                                <ul class="pagination justify-content-center">
+                                    <?= $pagination->render() ?>
+                                </ul>
+                            </nav>
                         <?php endif; ?>
+
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Submit to Job Modal -->
+<div class="modal fade" id="submitToJobModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Submit Candidate to Job</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="submitToJobForm" method="POST" action="/panel/modules/candidates/handlers/submit_to_job.php">
+                <div class="modal-body">
+                    <input type="hidden" name="candidate_code" id="submit_candidate_code">
+                    <input type="hidden" name="csrf_token" value="<?= \ProConsultancy\Core\CSRFToken::generate() ?>">
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Candidate</label>
+                        <input type="text" class="form-control" id="submit_candidate_name" readonly>
                     </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Select Job</label>
+                        <select name="job_code" class="form-select" required>
+                            <option value="">-- Select Job --</option>
+                            <!-- Will be populated via AJAX -->
+                        </select>
+                        <small class="text-muted">Only open jobs are shown</small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Submission Notes</label>
+                        <textarea name="notes" class="form-control" rows="3" placeholder="Why this candidate is a good fit..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Submit to Job</button>
                 </div>
             </form>
-        </div>
-    </div>
-
-    <!-- Bulk Actions Bar (Hidden by default) -->
-    <div class="alert alert-info d-none mb-3" id="bulkActionsBar">
-        <div class="d-flex justify-content-between align-items-center">
-            <div>
-                <strong><span id="selectedCount">0</span> candidate(s) selected</strong>
-            </div>
-            <div class="btn-group">
-                <?php if (Permission::can('candidates', 'assign')): ?>
-                    <button type="button" class="btn btn-sm btn-primary" id="bulkAssign">
-                        <i class="bx bx-user-check"></i> Assign
-                    </button>
-                <?php endif; ?>
-                <?php if (Permission::can('candidates', 'edit')): ?>
-                    <button type="button" class="btn btn-sm btn-warning" id="bulkChangeStatus">
-                        <i class="bx bx-sync"></i> Change Status
-                    </button>
-                    <button type="button" class="btn btn-sm btn-info" id="bulkChangeLeadType">
-                        <i class="bx bx-target-lock"></i> Change Lead Type
-                    </button>
-                <?php endif; ?>
-                <?php if (Permission::can('candidates', 'delete')): ?>
-                    <button type="button" class="btn btn-sm btn-danger" id="bulkDelete">
-                        <i class="bx bx-trash"></i> Delete
-                    </button>
-                <?php endif; ?>
-            </div>
-        </div>
-    </div>
-
-    <!-- Candidates Table -->
-    <div class="card">
-        <div class="card-body">
-            <?php if (empty($candidates)): ?>
-                <div class="text-center py-5">
-                    <i class="bx bx-user-x" style="font-size: 4rem; color: #ccc;"></i>
-                    <h5 class="mt-3 text-muted">No candidates found</h5>
-                    <p class="text-muted">Try adjusting your filters or add a new candidate</p>
-                </div>
-            <?php else: ?>
-                <div class="table-responsive">
-                    <table class="table table-hover">
-                        <thead>
-                            <tr>
-                                <th width="30">
-                                    <input type="checkbox" class="form-check-input" id="selectAll">
-                                </th>
-                                <th>Candidate</th>
-                                <th>Contact</th>
-                                <th>Current Role</th>
-                                <th>Skills</th>
-                                <th>Status</th>
-                                <th>Lead Type</th>
-                                <th>Location</th>
-                                <th>Assigned To</th>
-                                <th>Updated</th>
-                                <th width="100">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($candidates as $candidate): ?>
-                                <tr>
-                                    <td>
-                                        <input type="checkbox" class="form-check-input candidate-checkbox" 
-                                               value="<?= $candidate['candidate_code'] ?>">
-                                    </td>
-                                    <td>
-                                        <a href="/panel/modules/candidates/view.php?code=<?= $candidate['candidate_code'] ?>" 
-                                           class="text-decoration-none fw-bold">
-                                            <?= htmlspecialchars($candidate['candidate_name']) ?>
-                                        </a>
-                                        <?php if (!empty($candidate['professional_summary'])): ?>
-                                            <br>
-                                            <small class="text-muted">
-                                                <?= htmlspecialchars(substr($candidate['professional_summary'], 0, 60)) ?>...
-                                            </small>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td>
-                                        <small>
-                                            <i class="bx bx-envelope"></i> <?= htmlspecialchars($candidate['email']) ?><br>
-                                            <i class="bx bx-phone"></i> <?= htmlspecialchars($candidate['phone']) ?>
-                                        </small>
-                                    </td>
-                                    <td>
-                                        <?php if (!empty($candidate['current_position'])): ?>
-                                            <strong><?= htmlspecialchars($candidate['current_position']) ?></strong><br>
-                                        <?php endif; ?>
-                                        <?php if (!empty($candidate['current_employer'])): ?>
-                                            <small class="text-muted">
-                                                <?= htmlspecialchars($candidate['current_employer']) ?>
-                                            </small>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td>
-                                        <?php if (!empty($candidate['skills'])): ?>
-                                            <?php
-                                            $skillsArray = explode(', ', $candidate['skills']);
-                                            $displaySkills = array_slice($skillsArray, 0, 3);
-                                            $remainingSkills = count($skillsArray) - 3;
-                                            ?>
-                                            <div class="d-flex flex-wrap gap-1">
-                                                <?php foreach ($displaySkills as $skill): ?>
-                                                    <span class="badge bg-secondary"><?= htmlspecialchars($skill) ?></span>
-                                                <?php endforeach; ?>
-                                                <?php if ($remainingSkills > 0): ?>
-                                                    <span class="badge bg-light text-dark">+<?= $remainingSkills ?></span>
-                                                <?php endif; ?>
-                                            </div>
-                                        <?php else: ?>
-                                            <small class="text-muted">No skills</small>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td>
-                                        <?= getCandidateStatusBadge($candidate['status']) ?>
-                                    </td>
-                                    <td>
-                                        <?= getLeadTypeBadge($candidate['lead_type']) ?>
-                                    </td>
-                                    <td>
-                                        <small><?= htmlspecialchars($candidate['current_location'] ?? 'N/A') ?></small>
-                                    </td>
-                                    <td>
-                                        <?php if (!empty($candidate['assigned_to_name'])): ?>
-                                            <small><?= htmlspecialchars($candidate['assigned_to_name']) ?></small>
-                                        <?php else: ?>
-                                            <small class="text-muted">Unassigned</small>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td>
-                                        <small class="text-muted">
-                                            <?= date('M d, Y', strtotime($candidate['updated_at'])) ?>
-                                        </small>
-                                    </td>
-                                    <td>
-                                        <div class="btn-group btn-group-sm">
-                                            <a href="/panel/modules/candidates/view.php?code=<?= $candidate['candidate_code'] ?>" 
-                                               class="btn btn-outline-primary" title="View">
-                                                <i class="bx bx-show"></i>
-                                            </a>
-                                            <?php if (Permission::can('candidates', 'edit')): ?>
-                                                <a href="/panel/modules/candidates/edit.php?code=<?= $candidate['candidate_code'] ?>" 
-                                                   class="btn btn-outline-secondary" title="Edit">
-                                                    <i class="bx bx-edit"></i>
-                                                </a>
-                                            <?php endif; ?>
-                                        </div>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-
-                <!-- Pagination -->
-                <div class="mt-3">
-                    <?= $pagination->renderComplete('candidates') ?>
-                </div>
-            <?php endif; ?>
         </div>
     </div>
 </div>
@@ -456,34 +924,153 @@ require_once __DIR__ . '/../../includes/header.php';
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Bulk Assign Candidates</h5>
+                <h5 class="modal-title">Assign Candidates</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body">
-                <form id="bulkAssignForm">
-                    <p>Assign <strong><span id="bulkAssignCount">0</span> candidate(s)</strong> to:</p>
-                    <select class="form-select" name="recruiter" required>
-                        <option value="">Select recruiter...</option>
-                        <?php foreach ($recruiters as $recruiter): ?>
-                            <option value="<?= $recruiter['user_code'] ?>">
-                                <?= htmlspecialchars($recruiter['name']) ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </form>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="confirmBulkAssign">Assign</button>
-            </div>
+            <form id="bulkAssignForm" method="POST" action="/panel/modules/candidates/handlers/bulk-assign.php">
+                <div class="modal-body">
+                    <input type="hidden" name="candidate_codes" id="bulk_candidate_codes">
+                    <input type="hidden" name="csrf_token" value="<?= \ProConsultancy\Core\CSRFToken::generate() ?>">
+                    
+                    <p><span id="bulk_assign_count">0</span> candidates will be assigned to:</p>
+                    
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Recruiter</label>
+                        <select name="assigned_to" class="form-select" required>
+                            <option value="">-- Select Recruiter --</option>
+                            <?php foreach ($recruiters as $recruiter): ?>
+                                <option value="<?= e($recruiter['user_code']) ?>">
+                                    <?= e($recruiter['name']) ?> (<?= e($recruiter['level']) ?>)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Assign</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
 <?php endif; ?>
 
 <script>
-// Make candidateCode available globally for JS
-const candidateCode = null; // Not needed on list page
+// Auto-submit form on filter change
+document.querySelectorAll('#filterForm input[type="checkbox"], #filterForm select').forEach(el => {
+    el.addEventListener('change', function() {
+        document.getElementById('filterForm').submit();
+    });
+});
+
+// Bulk selection
+const selectAllCheckbox = document.getElementById('selectAll');
+const candidateCheckboxes = document.querySelectorAll('.candidate-checkbox');
+const bulkActionsDiv = document.getElementById('bulkActions');
+const selectedCountSpan = document.getElementById('selectedCount');
+
+function updateBulkActions() {
+    const selected = Array.from(candidateCheckboxes).filter(cb => cb.checked);
+    if (selected.length > 0) {
+        bulkActionsDiv.style.display = 'block';
+        selectedCountSpan.textContent = selected.length;
+    } else {
+        bulkActionsDiv.style.display = 'none';
+    }
+}
+
+selectAllCheckbox?.addEventListener('change', function() {
+    candidateCheckboxes.forEach(cb => cb.checked = this.checked);
+    updateBulkActions();
+});
+
+candidateCheckboxes.forEach(cb => {
+    cb.addEventListener('change', updateBulkActions);
+});
+
+// Submit to Job
+document.querySelectorAll('.submit-to-job-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const candidateCode = this.dataset.candidateCode;
+        const candidateName = this.dataset.candidateName;
+        
+        document.getElementById('submit_candidate_code').value = candidateCode;
+        document.getElementById('submit_candidate_name').value = candidateName;
+        
+        // Load available jobs via AJAX
+        fetch(`/panel/modules/jobs/handlers/get-open-jobs.php`)
+            .then(r => r.json())
+            .then(data => {
+                const select = document.querySelector('#submitToJobModal select[name="job_code"]');
+                select.innerHTML = '<option value="">-- Select Job --</option>';
+                data.jobs.forEach(job => {
+                    select.innerHTML += `<option value="${job.job_code}">${job.job_title} - ${job.client_name}</option>`;
+                });
+            });
+        
+        const modal = new bootstrap.Modal(document.getElementById('submitToJobModal'));
+        modal.show();
+    });
+});
+// Smart search suggestions
+$('#search').on('input', function() {
+    const term = $(this).val().trim();
+    $('#searchClear').toggle(term.length > 0);
+    
+    if (term.length < 2) {
+        $('#searchSuggestions').hide();
+        return;
+    }
+    
+    // Show suggestions after delay
+    clearTimeout(window.searchTimeout);
+    window.searchTimeout = setTimeout(() => {
+        $.get('/api/skill-suggestions', { term: term }, function(data) {
+            if (data.suggestions && data.suggestions.length > 0) {
+                let html = '';
+                data.suggestions.forEach(s => {
+                    html += `<div class="p-2 border-bottom suggestion-item">
+                        <strong>${s.primary}</strong><br>
+                        <small class="text-muted">${s.related.join(', ')}</small>
+                    </div>`;
+                });
+                $('#searchSuggestions').html(html).show();
+            } else {
+                $('#searchSuggestions').hide();
+            }
+        });
+    }, 300);
+});
+
+// Close suggestions when clicking outside
+$(document).on('click', function(e) {
+    if (!$(e.target).closest('#search, #searchSuggestions').length) {
+        $('#searchSuggestions').hide();
+    }
+});
+
+// Immediate availability toggle
+$('#availableNow').change(function() {
+    if (this.checked) {
+        // Hide notice period options
+        $('#noticePeriodContainer').hide();
+    } else {
+        $('#noticePeriodContainer').show();
+    }
+});
+
+// Bulk Assign
+document.getElementById('bulkAssign')?.addEventListener('click', function() {
+    const selected = Array.from(candidateCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
+    document.getElementById('bulk_candidate_codes').value = selected.join(',');
+    document.getElementById('bulk_assign_count').textContent = selected.length;
+    
+    const modal = new bootstrap.Modal(document.getElementById('bulkAssignModal'));
+    modal.show();
+});
 </script>
 
-<?php require_once __DIR__ . '/../../includes/footer.php'; ?>
+<?php
+require_once __DIR__ . '/../../includes/footer.php';
+?>

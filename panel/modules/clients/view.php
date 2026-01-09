@@ -1,7 +1,7 @@
 <?php
 /**
  * Client Detail View
- * Shows complete client information with jobs and placements
+ * Shows complete client information with jobs, submissions, and placements
  */
 if (!defined('INCLUDED_FROM_INDEX')) {
     require_once __DIR__ . '/../_common.php';
@@ -31,6 +31,33 @@ if (!$canViewAll && !$canViewOwn) {
     exit;
 }
 
+// ✅ ADDED: Helper functions (MISSING in original!)
+function getInternalStatusBadge($status) {
+    $colors = [
+        'pending' => 'warning',
+        'approved' => 'success',
+        'rejected' => 'danger',
+        'withdrawn' => 'secondary'
+    ];
+    $color = $colors[$status] ?? 'secondary';
+    return '<span class="badge bg-' . $color . '">' . ucfirst($status) . '</span>';
+}
+
+function getClientStatusBadge($status) {
+    $colors = [
+        'not_sent' => 'secondary',
+        'submitted' => 'info',
+        'interviewing' => 'primary',
+        'offered' => 'success',
+        'placed' => 'success',
+        'rejected' => 'danger',
+        'withdrawn' => 'secondary'
+    ];
+    $color = $colors[$status] ?? 'secondary';
+    $label = ucfirst(str_replace('_', ' ', $status));
+    return '<span class="badge bg-' . $color . '">' . $label . '</span>';
+}
+
 // Get client details
 $sql = "
     SELECT 
@@ -42,6 +69,7 @@ $sql = "
     LEFT JOIN users u ON c.account_manager = u.user_code
     LEFT JOIN users creator ON c.created_by = creator.user_code
     WHERE c.client_code = ?
+    AND c.deleted_at IS NULL
 ";
 
 $stmt = $conn->prepare($sql);
@@ -65,9 +93,9 @@ if (!$canViewAll && $canViewOwn) {
 $jobsSQL = "
     SELECT 
         j.*,
-        (SELECT COUNT(*) FROM submissions WHERE job_code = j.job_code) as total_submissions,
-        (SELECT COUNT(*) FROM submissions WHERE job_code = j.job_code AND client_status = 'placed') as total_placements,
-        (SELECT COUNT(*) FROM submissions WHERE job_code = j.job_code AND internal_status = 'pending') as pending_submissions
+        (SELECT COUNT(*) FROM submissions WHERE job_code = j.job_code AND deleted_at IS NULL) as total_submissions,
+        (SELECT COUNT(*) FROM submissions WHERE job_code = j.job_code AND client_status = 'placed' AND deleted_at IS NULL) as total_placements,
+        (SELECT COUNT(*) FROM submissions WHERE job_code = j.job_code AND internal_status = 'pending' AND deleted_at IS NULL) as pending_submissions
     FROM jobs j
     WHERE j.client_code = ?
     AND j.deleted_at IS NULL
@@ -83,9 +111,36 @@ $jobsSQL = "
 ";
 
 $stmt = $conn->prepare($jobsSQL);
-$stmt->bind_param("s", $client_code);
+$stmt->bind_param("s", $client_code);  // ✅ FIXED
 $stmt->execute();
 $jobs = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+// Get all submissions for this client's jobs
+$submissionsSQL = "
+    SELECT 
+        s.submission_code,
+        s.internal_status,
+        s.client_status,
+        s.created_at,
+        c.candidate_name,
+        c.candidate_code,
+        j.job_title,
+        j.job_code,
+        u.name as submitted_by_name
+    FROM submissions s
+    JOIN candidates c ON s.candidate_code = c.candidate_code
+    JOIN jobs j ON s.job_code = j.job_code
+    LEFT JOIN users u ON s.submitted_by = u.user_code
+    WHERE j.client_code = ?
+    AND s.deleted_at IS NULL
+    ORDER BY s.created_at DESC
+    LIMIT 50
+";
+
+$stmt = $conn->prepare($submissionsSQL);
+$stmt->bind_param("s", $client_code);
+$stmt->execute();
+$submissions = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
 // Get active placements (candidates currently working)
 $placementsSQL = "
@@ -95,6 +150,7 @@ $placementsSQL = "
         c.email as candidate_email,
         c.phone as candidate_phone,
         c.current_location,
+        c.candidate_code,
         j.job_title,
         j.job_code,
         DATEDIFF(NOW(), s.placement_date) as days_placed
@@ -103,11 +159,12 @@ $placementsSQL = "
     JOIN jobs j ON s.job_code = j.job_code
     WHERE j.client_code = ?
     AND s.client_status = 'placed'
+    AND s.deleted_at IS NULL
     ORDER BY s.placement_date DESC
 ";
 
 $stmt = $conn->prepare($placementsSQL);
-$stmt->bind_param("s", $client_code);
+$stmt->bind_param("s", $client_code); 
 $stmt->execute();
 $placements = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
@@ -117,6 +174,7 @@ $notesSQL = "
     FROM notes n
     LEFT JOIN users u ON n.created_by = u.user_code
     WHERE n.entity_type = 'client' AND n.entity_code = ?
+    AND n.deleted_at IS NULL
     ORDER BY n.created_at DESC
     LIMIT 10
 ";
@@ -128,7 +186,12 @@ $notes = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
 // Calculate statistics
 $activeJobs = array_filter($jobs, fn($j) => in_array($j['status'], ['open', 'filling']));
-$totalPlacements = array_sum(array_column($jobs, 'total_placements'));
+$totalPlacements = count($placements);
+$totalSubmissions = count($submissions);
+$interviewingCount = count(array_filter($submissions, fn($s) => $s['client_status'] === 'interviewing'));
+
+// Calculate success rate
+$successRate = $totalSubmissions > 0 ? round(($totalPlacements / $totalSubmissions) * 100) : 0;
 
 // Page config
 $pageTitle = $client['company_name'];
@@ -155,6 +218,13 @@ require_once __DIR__ . '/../../includes/header.php';
 .placement-card {
     border-left: 3px solid #198754;
     background: #f8f9fa;
+}
+.stat-card {
+    border-radius: 8px;
+    transition: transform 0.2s;
+}
+.stat-card:hover {
+    transform: translateY(-5px);
 }
 </style>
 
@@ -184,9 +254,11 @@ require_once __DIR__ . '/../../includes/header.php';
                                 <i class="bx bx-edit"></i> Edit Client
                             </a>
                         <?php endif; ?>
-                        <a href="../jobs/?action=create&client_code=<?= escape($client_code) ?>" class="btn btn-success">
-                            <i class="bx bx-plus"></i> Create Job
-                        </a>
+                        <?php if (Permission::can('jobs', 'create')): ?>
+                            <a href="../jobs/?action=create&client_code=<?= escape($client_code) ?>" class="btn btn-success">
+                                <i class="bx bx-plus"></i> Create Job
+                            </a>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -197,7 +269,7 @@ require_once __DIR__ . '/../../includes/header.php';
 <!-- Statistics Cards -->
 <div class="row mb-4">
     <div class="col-md-3 mb-3">
-        <div class="card">
+        <div class="card stat-card">
             <div class="card-body text-center">
                 <i class="bx bx-briefcase display-4 text-info mb-2"></i>
                 <h3 class="mb-0"><?= count($activeJobs) ?></h3>
@@ -207,17 +279,22 @@ require_once __DIR__ . '/../../includes/header.php';
     </div>
     
     <div class="col-md-3 mb-3">
-        <div class="card">
+        <div class="card stat-card">
             <div class="card-body text-center">
                 <i class="bx bx-file display-4 text-primary mb-2"></i>
-                <h3 class="mb-0"><?= count($jobs) ?></h3>
-                <small class="text-muted">Total Jobs</small>
+                <h3 class="mb-0"><?= $totalSubmissions ?></h3>
+                <small class="text-muted">Total Submissions</small>
+                <?php if ($interviewingCount > 0): ?>
+                    <div class="mt-2">
+                        <span class="badge bg-warning"><?= $interviewingCount ?> Interviewing</span>
+                    </div>
+                <?php endif; ?>
             </div>
         </div>
     </div>
     
     <div class="col-md-3 mb-3">
-        <div class="card">
+        <div class="card stat-card">
             <div class="card-body text-center">
                 <i class="bx bx-trophy display-4 text-success mb-2"></i>
                 <h3 class="mb-0"><?= $totalPlacements ?></h3>
@@ -227,11 +304,11 @@ require_once __DIR__ . '/../../includes/header.php';
     </div>
     
     <div class="col-md-3 mb-3">
-        <div class="card">
+        <div class="card stat-card">
             <div class="card-body text-center">
-                <i class="bx bx-user-check display-4 text-warning mb-2"></i>
-                <h3 class="mb-0"><?= count($placements) ?></h3>
-                <small class="text-muted">Active Placements</small>
+                <i class="bx bx-trending-up display-4 text-warning mb-2"></i>
+                <h3 class="mb-0"><?= $successRate ?>%</h3>
+                <small class="text-muted">Success Rate</small>
             </div>
         </div>
     </div>
@@ -239,7 +316,7 @@ require_once __DIR__ . '/../../includes/header.php';
 
 <!-- Main Content -->
 <div class="row">
-    <!-- Left Column: Jobs & Placements -->
+    <!-- Left Column: Jobs & Submissions -->
     <div class="col-md-8">
         <!-- Jobs List -->
         <div class="card mb-4">
@@ -248,18 +325,22 @@ require_once __DIR__ . '/../../includes/header.php';
                     <i class="bx bx-briefcase"></i> Jobs 
                     <span class="badge bg-secondary"><?= count($jobs) ?></span>
                 </h5>
-                <a href="../jobs/?action=create&client_code=<?= escape($client_code) ?>" class="btn btn-sm btn-success">
-                    <i class="bx bx-plus"></i> New Job
-                </a>
+                <?php if (Permission::can('jobs', 'create')): ?>
+                    <a href="../jobs/?action=create&client_code=<?= escape($client_code) ?>" class="btn btn-sm btn-success">
+                        <i class="bx bx-plus"></i> New Job
+                    </a>
+                <?php endif; ?>
             </div>
             <div class="card-body p-0">
                 <?php if (empty($jobs)): ?>
                     <div class="text-center py-5">
                         <i class="bx bx-briefcase display-1 text-muted"></i>
                         <p class="text-muted mt-3">No jobs created yet</p>
-                        <a href="../jobs/?action=create&client_code=<?= escape($client_code) ?>" class="btn btn-primary">
-                            <i class="bx bx-plus"></i> Create First Job
-                        </a>
+                        <?php if (Permission::can('jobs', 'create')): ?>
+                            <a href="../jobs/?action=create&client_code=<?= escape($client_code) ?>" class="btn btn-primary">
+                                <i class="bx bx-plus"></i> Create First Job
+                            </a>
+                        <?php endif; ?>
                     </div>
                 <?php else: ?>
                     <div class="table-responsive">
@@ -281,8 +362,10 @@ require_once __DIR__ . '/../../includes/header.php';
                                                 <strong><?= escape($job['job_title']) ?></strong><br>
                                                 <small class="text-muted">
                                                     <?= escape($job['job_code']) ?> | 
-                                                    <?= escape($job['location'] ?: 'Remote') ?> |
-                                                    <?= ucfirst($job['employment_type']) ?>
+                                                    <?= escape($job['location'] ?: 'Remote') ?>
+                                                    <?php if ($job['is_published']): ?>
+                                                        | <span class="badge bg-success">Published</span>
+                                                    <?php endif; ?>
                                                 </small>
                                             </div>
                                         </td>
@@ -290,6 +373,7 @@ require_once __DIR__ . '/../../includes/header.php';
                                             <?php
                                             $statusBadge = [
                                                 'draft' => 'secondary',
+                                                'pending_approval' => 'warning',
                                                 'open' => 'info',
                                                 'filling' => 'primary',
                                                 'filled' => 'success',
@@ -324,191 +408,80 @@ require_once __DIR__ . '/../../includes/header.php';
                 <?php endif; ?>
             </div>
         </div>
-<!-- Submissions Section -->
-<div class="card mt-4">
-    <div class="card-header">
-        <h5 class="mb-0">Submissions for this Client</h5>
-    </div>
-    <div class="card-body">
-        <?php
-        // Get all submissions for this client's jobs
-        $submissionStmt = $conn->prepare("
-            SELECT 
-                s.submission_code,
-                s.internal_status,
-                s.client_status,
-                s.created_at,
-                c.name as candidate_name,
-                j.job_title,
-                j.job_code,
-                u.name as submitted_by_name
-            FROM submissions s
-            JOIN candidates c ON s.candidate_code = c.candidate_code
-            JOIN jobs j ON s.job_code = j.job_code
-            JOIN users u ON s.submitted_by = u.user_code
-            WHERE j.client_code = ?
-            AND s.deleted_at IS NULL
-            ORDER BY s.created_at DESC
-            LIMIT 50
-        ");
-        $submissionStmt->bind_param("s", $clientCode);
-        $submissionStmt->execute();
-        $submissions = $submissionStmt->get_result()->fetch_all(MYSQLI_ASSOC);
-        
-        if (count($submissions) > 0): ?>
-            <div class="table-responsive">
-                <table class="table table-hover">
-                    <thead>
-                        <tr>
-                            <th>Candidate</th>
-                            <th>Job</th>
-                            <th>Status</th>
-                            <th>Submitted By</th>
-                            <th>Date</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($submissions as $sub): ?>
-                            <tr>
-                                <td>
-                                    <a href="/panel/modules/candidates/view.php?code=<?= $sub['candidate_code'] ?>">
-                                        <?= htmlspecialchars($sub['candidate_name']) ?>
-                                    </a>
-                                </td>
-                                <td>
-                                    <a href="/panel/modules/jobs/view.php?code=<?= $sub['job_code'] ?>">
-                                        <?= htmlspecialchars($sub['job_title']) ?>
-                                    </a>
-                                </td>
-                                <td>
-                                    <?= getInternalStatusBadge($sub['internal_status']) ?>
-                                    <?php if ($sub['internal_status'] === 'approved'): ?>
-                                        <?= getClientStatusBadge($sub['client_status']) ?>
-                                    <?php endif; ?>
-                                </td>
-                                <td><?= htmlspecialchars($sub['submitted_by_name']) ?></td>
-                                <td><?= date('d/m/Y', strtotime($sub['created_at'])) ?></td>
-                                <td>
-                                    <a href="/panel/modules/submissions/view.php?code=<?= $sub['submission_code'] ?>" 
-                                       class="btn btn-sm btn-outline-primary">
-                                        View
-                                    </a>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        <?php else: ?>
-            <p class="text-muted">No submissions yet for this client.</p>
-        <?php endif; ?>
-    </div>
-</div>
 
-<!-- Placement History Section -->
-<div class="card mt-4">
-    <div class="card-header">
-        <h5 class="mb-0">Placement History</h5>
-    </div>
-    <div class="card-body">
-        <?php
-        // Get placements
-        $placementStmt = $conn->prepare("
-            SELECT 
-                s.submission_code,
-                s.placement_date,
-                s.placement_notes,
-                c.name as candidate_name,
-                j.job_title
-            FROM submissions s
-            JOIN candidates c ON s.candidate_code = c.candidate_code
-            JOIN jobs j ON s.job_code = j.job_code
-            WHERE j.client_code = ?
-            AND s.client_status = 'placed'
-            AND s.deleted_at IS NULL
-            ORDER BY s.placement_date DESC
-        ");
-        $placementStmt->bind_param("s", $clientCode);
-        $placementStmt->execute();
-        $placements = $placementStmt->get_result()->fetch_all(MYSQLI_ASSOC);
-        
-        if (count($placements) > 0): ?>
-            <div class="table-responsive">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>Candidate</th>
-                            <th>Position</th>
-                            <th>Placement Date</th>
-                            <th>Notes</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($placements as $placement): ?>
-                            <tr>
-                                <td><?= htmlspecialchars($placement['candidate_name']) ?></td>
-                                <td><?= htmlspecialchars($placement['job_title']) ?></td>
-                                <td><?= date('d/m/Y', strtotime($placement['placement_date'])) ?></td>
-                                <td><?= htmlspecialchars($placement['placement_notes'] ?? '-') ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
+        <!-- Recent Submissions -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bx bx-user-check"></i> Recent Submissions 
+                    <span class="badge bg-secondary"><?= min(count($submissions), 50) ?></span>
+                </h5>
             </div>
-        <?php else: ?>
-            <p class="text-muted">No placements yet.</p>
-        <?php endif; ?>
-    </div>
-</div>
+            <div class="card-body">
+                <?php if (empty($submissions)): ?>
+                    <div class="text-center py-4">
+                        <i class="bx bx-user-x display-4 text-muted"></i>
+                        <p class="text-muted mt-2">No submissions yet for this client</p>
+                    </div>
+                <?php else: ?>
+                    <div class="table-responsive">
+                        <table class="table table-hover table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Candidate</th>
+                                    <th>Job</th>
+                                    <th>Status</th>
+                                    <th>Submitted By</th>
+                                    <th>Date</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach (array_slice($submissions, 0, 10) as $sub): ?>
+                                    <tr>
+                                        <td>
+                                            <a href="../candidates/?action=view&code=<?= escape($sub['candidate_code']) ?>">
+                                                <?= escape($sub['candidate_name']) ?>
+                                            </a>
+                                        </td>
+                                        <td>
+                                            <a href="../jobs/?action=view&code=<?= escape($sub['job_code']) ?>">
+                                                <?= escape($sub['job_title']) ?>
+                                            </a>
+                                        </td>
+                                        <td>
+                                            <?= getInternalStatusBadge($sub['internal_status']) ?>
+                                            <?php if ($sub['internal_status'] === 'approved'): ?>
+                                                <?= getClientStatusBadge($sub['client_status']) ?>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td><?= escape($sub['submitted_by_name']) ?></td>
+                                        <td><?= date('M d, Y', strtotime($sub['created_at'])) ?></td>
+                                        <td>
+                                            <a href="../submissions/?action=view&code=<?= escape($sub['submission_code']) ?>" 
+                                               class="btn btn-sm btn-outline-primary">
+                                                <i class="bx bx-show"></i>
+                                            </a>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                    <?php if (count($submissions) > 10): ?>
+                        <div class="text-center mt-3">
+                            <small class="text-muted">Showing 10 of <?= count($submissions) ?> submissions</small>
+                        </div>
+                    <?php endif; ?>
+                <?php endif; ?>
+            </div>
+        </div>
 
-<!-- Client Statistics -->
-<div class="row mt-4">
-    <div class="col-md-3">
-        <div class="card text-center">
-            <div class="card-body">
-                <h3 class="mb-0 text-primary"><?= count($submissions) ?></h3>
-                <small class="text-muted">Total Submissions</small>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card text-center">
-            <div class="card-body">
-                <h3 class="mb-0 text-warning">
-                    <?= count(array_filter($submissions, fn($s) => $s['client_status'] === 'interviewing')) ?>
-                </h3>
-                <small class="text-muted">Interviewing</small>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card text-center">
-            <div class="card-body">
-                <h3 class="mb-0 text-success"><?= count($placements) ?></h3>
-                <small class="text-muted">Placements</small>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card text-center">
-            <div class="card-body">
-                <?php
-                $successRate = count($submissions) > 0 
-                    ? round((count($placements) / count($submissions)) * 100) 
-                    : 0;
-                ?>
-                <h3 class="mb-0 text-info"><?= $successRate ?>%</h3>
-                <small class="text-muted">Success Rate</small>
-            </div>
-        </div>
-    </div>
-</div>
         <!-- Active Placements -->
         <div class="card mb-4">
             <div class="card-header">
                 <h5 class="mb-0">
-                    <i class="bx bx-user-check"></i> Active Placements 
+                    <i class="bx bx-trophy"></i> Active Placements 
                     <span class="badge bg-success"><?= count($placements) ?></span>
                 </h5>
             </div>
@@ -536,10 +509,13 @@ require_once __DIR__ . '/../../includes/header.php';
                                                 (<?= date('M d, Y', strtotime($placement['placement_date'])) ?>)
                                             </small>
                                         </p>
+                                        <?php if ($placement['placement_notes']): ?>
+                                            <p class="mb-2 small text-muted"><?= escape($placement['placement_notes']) ?></p>
+                                        <?php endif; ?>
                                         <div class="d-flex gap-2">
                                             <a href="../submissions/?action=view&code=<?= escape($placement['submission_code']) ?>" 
                                                class="btn btn-sm btn-outline-primary">
-                                                <i class="bx bx-show"></i> View Details
+                                                <i class="bx bx-show"></i> Details
                                             </a>
                                             <a href="../candidates/?action=view&code=<?= escape($placement['candidate_code']) ?>" 
                                                class="btn btn-sm btn-outline-secondary">
@@ -602,13 +578,21 @@ require_once __DIR__ . '/../../includes/header.php';
                         <br><small class="text-muted">by <?= escape($client['created_by_name']) ?></small>
                     <?php endif; ?>
                 </p>
+                
+                <?php if ($client['notes']): ?>
+                    <hr>
+                    <p class="mb-2">
+                        <strong><i class="bx bx-note"></i> Notes:</strong><br>
+                        <small class="text-muted"><?= nl2br(escape($client['notes'])) ?></small>
+                    </p>
+                <?php endif; ?>
             </div>
         </div>
 
         <!-- Notes Section -->
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bx bx-note"></i> Notes</h5>
+                <h5 class="mb-0"><i class="bx bx-note"></i> Activity Notes</h5>
                 <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addNoteModal">
                     <i class="bx bx-plus"></i> Add
                 </button>
@@ -628,6 +612,9 @@ require_once __DIR__ . '/../../includes/header.php';
                                         <?= date('M d, Y g:i A', strtotime($note['created_at'])) ?>
                                     </small>
                                 </div>
+                                <?php if ($note['note_type'] !== 'general'): ?>
+                                    <span class="badge bg-info"><?= ucfirst($note['note_type']) ?></span>
+                                <?php endif; ?>
                                 <p class="mb-0 mt-1"><?= nl2br(escape($note['content'])) ?></p>
                             </div>
                         <?php endforeach; ?>
@@ -643,9 +630,11 @@ require_once __DIR__ . '/../../includes/header.php';
             </div>
             <div class="card-body">
                 <div class="d-grid gap-2">
-                    <a href="../jobs/?action=create&client_code=<?= escape($client_code) ?>" class="btn btn-success">
-                        <i class="bx bx-plus"></i> Create New Job
-                    </a>
+                    <?php if (Permission::can('jobs', 'create')): ?>
+                        <a href="../jobs/?action=create&client_code=<?= escape($client_code) ?>" class="btn btn-success">
+                            <i class="bx bx-plus"></i> Create New Job
+                        </a>
+                    <?php endif; ?>
                     <?php if (Permission::can('clients', 'edit')): ?>
                         <a href="?action=edit&code=<?= escape($client_code) ?>" class="btn btn-primary">
                             <i class="bx bx-edit"></i> Edit Client
@@ -665,7 +654,8 @@ require_once __DIR__ . '/../../includes/header.php';
     <div class="modal-dialog">
         <form method="POST" action="handlers/add-note.php">
             <?= CSRFToken::field() ?>
-            <input type="hidden" name="client_code" value="<?= escape($client_code) ?>">
+            <input type="hidden" name="entity_type" value="client">
+            <input type="hidden" name="entity_code" value="<?= escape($client_code) ?>">
             
             <div class="modal-content">
                 <div class="modal-header">

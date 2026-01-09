@@ -26,7 +26,7 @@ try {
     $client_code = input('client_code');
     $job_title = input('job_title');
     $description = input('description');
-    $location = input('location', 'Remote');
+    $location = input('location', 'Belgium');
     $salary_min = input('salary_min') ?: null;
     $salary_max = input('salary_max') ?: null;
     $show_salary = input('show_salary', 0) ? 1 : 0;

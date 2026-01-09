@@ -283,7 +283,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <?php endif; ?>
             </div>
             <h1>ProConsultancy</h1>
-            <p>Recruitment Management System</p>
+            <p>Trusted Recruitment Partner</p>
         </div>
         
         <div class="login-body">

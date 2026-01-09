@@ -3,9 +3,21 @@
  * Forgot Password Page
  * Request password reset link
  * 
- * @version 5.0
+ * @version 2.0
  */
+// Define PANEL_ACCESS before loading anything
+if (!defined('PANEL_ACCESS')) {
+    define('PANEL_ACCESS', true);
+}
 
+// Define paths
+if (!defined('ROOT_PATH')) {
+    define('ROOT_PATH', dirname(__DIR__));
+}
+
+if (!defined('INCLUDES_PATH')) {
+    define('INCLUDES_PATH', ROOT_PATH . '/includes');
+}
 require_once __DIR__ . '/../includes/config/app.php';
 require_once __DIR__ . '/../includes/Core/Database.php';
 require_once __DIR__ . '/../includes/Core/Logger.php';
@@ -106,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <style>
         body {
             font-family: 'Inter', sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #1e3a8a; /* Thick blue background */
             min-height: 100vh;
             display: flex;
             align-items: center;
@@ -127,7 +139,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         .reset-icon {
             font-size: 64px;
-            color: #667eea;
+            color: #1e3a8a;
             margin-bottom: 20px;
         }
         h1 {
@@ -138,7 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .btn-reset {
             width: 100%;
             padding: 14px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #1e3a8a 0%, #1e3a8a 100%);
             border: none;
             border-radius: 8px;
             color: white;
@@ -149,7 +161,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             margin-top: 20px;
         }
         .back-to-login a {
-            color: #667eea;
+            color: #1e3a8a;
             text-decoration: none;
             font-weight: 500;
         }

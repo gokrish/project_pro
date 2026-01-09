@@ -1,186 +1,150 @@
 /**
  * Logger Utility
- * Centralized logging with error tracking
+ * Handles application logging with different levels
  * 
- * @version 5.0
+ * @version 2.0
  */
 
 const Logger = {
     /**
      * Log levels
      */
-    LEVELS: {
-        DEBUG: 'debug',
-        INFO: 'info',
-        WARN: 'warn',
-        ERROR: 'error',
-        CRITICAL: 'critical'
+    levels: {
+        DEBUG: 0,
+        INFO: 1,
+        WARNING: 2,
+        ERROR: 3,
+        CRITICAL: 4
     },
     
     /**
-     * Enable/disable logging based on debug mode
+     * Current log level (can be changed via settings)
      */
-    enabled: window.APP_CONFIG?.debug || false,
+    currentLevel: 1, // INFO by default
     
     /**
-     * Store logs for debugging
+     * Enable/disable console logging
      */
-    logs: [],
+    enabled: true,
     
     /**
-     * Log debug message
+     * Log a debug message
      */
     debug(message, data = null) {
-        this._log(this.LEVELS.DEBUG, message, data, 'color: #718096');
+        this.log('DEBUG', message, data);
     },
     
     /**
-     * Log info message
+     * Log an info message
      */
     info(message, data = null) {
-        this._log(this.LEVELS.INFO, message, data, 'color: #4299e1');
+        this.log('INFO', message, data);
     },
     
     /**
-     * Log warning message
+     * Log a warning message
      */
-    warn(message, data = null) {
-        this._log(this.LEVELS.WARN, message, data, 'color: #f6ad55');
+    warning(message, data = null) {
+        this.log('WARNING', message, data);
     },
     
     /**
-     * Log error message
+     * Log an error message
      */
     error(message, data = null) {
-        this._log(this.LEVELS.ERROR, message, data, 'color: #f56565');
-        
-        // Send critical errors to server
-        if (this.enabled) {
-            this._sendToServer(this.LEVELS.ERROR, message, data);
-        }
+        this.log('ERROR', message, data);
     },
     
     /**
-     * Log critical error (always sent to server)
+     * Log a critical message
      */
     critical(message, data = null) {
-        this._log(this.LEVELS.CRITICAL, message, data, 'color: #c53030; font-weight: bold');
-        this._sendToServer(this.LEVELS.CRITICAL, message, data);
+        this.log('CRITICAL', message, data);
     },
     
     /**
-     * Internal logging method
+     * Internal log method
      */
-    _log(level, message, data, style) {
+    log(level, message, data = null) {
+        if (!this.enabled) {
+            return;
+        }
+        
+        const levelValue = this.levels[level] || 0;
+        
+        if (levelValue < this.currentLevel) {
+            return;
+        }
+        
         const timestamp = new Date().toISOString();
-        const logEntry = {
-            timestamp,
-            level,
-            message,
-            data,
-            url: window.location.href,
-            user: window.APP_CONFIG?.user?.code || 'guest'
-        };
+        const prefix = `[${timestamp}] [${level}]`;
         
-        // Store log
-        this.logs.push(logEntry);
+        // Choose console method
+        const consoleMethod = {
+            'DEBUG': 'log',
+            'INFO': 'info',
+            'WARNING': 'warn',
+            'ERROR': 'error',
+            'CRITICAL': 'error'
+        }[level] || 'log';
         
-        // Keep only last 100 logs
-        if (this.logs.length > 100) {
-            this.logs.shift();
+        // Log to console
+        if (data) {
+            console[consoleMethod](prefix, message, data);
+        } else {
+            console[consoleMethod](prefix, message);
         }
         
-        // Console output in debug mode
-        if (this.enabled) {
-            const prefix = `%c[${level.toUpperCase()}] ${timestamp}`;
-            
-            if (data) {
-                console.log(prefix, style, message, data);
-            } else {
-                console.log(prefix, style, message);
-            }
+        // Send critical errors to server (optional)
+        if (level === 'CRITICAL' || level === 'ERROR') {
+            this.sendToServer(level, message, data);
         }
     },
     
     /**
-     * Send error to server
+     * Send log to server (for error tracking)
      */
-    _sendToServer(level, message, data) {
+    sendToServer(level, message, data) {
         try {
-            fetch('/panel/api/log-error.php', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-Token': window.APP_CONFIG?.csrfToken || ''
-                },
-                body: JSON.stringify({
-                    level,
-                    message,
-                    data,
-                    url: window.location.href,
-                    user_agent: navigator.userAgent,
-                    stack: new Error().stack
-                })
-            }).catch(err => {
-                console.error('Failed to send error to server:', err);
+            // Only send if API is available
+            if (typeof API === 'undefined') {
+                return;
+            }
+            
+            API.post('logs/client-error.php', {
+                level: level,
+                message: message,
+                data: data,
+                url: window.location.href,
+                userAgent: navigator.userAgent,
+                timestamp: new Date().toISOString()
+            }).catch(() => {
+                // Silently fail - don't want to create infinite loop
             });
-        } catch (err) {
-            console.error('Error in _sendToServer:', err);
+        } catch (error) {
+            // Silently fail
         }
     },
     
     /**
-     * Get all logs
+     * Set log level
      */
-    getAllLogs() {
-        return this.logs;
-    },
-    
-    /**
-     * Export logs as JSON
-     */
-    export() {
-        const dataStr = JSON.stringify(this.logs, null, 2);
-        const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-        
-        const exportFileDefaultName = `logs_${new Date().toISOString()}.json`;
-        
-        const linkElement = document.createElement('a');
-        linkElement.setAttribute('href', dataUri);
-        linkElement.setAttribute('download', exportFileDefaultName);
-        linkElement.click();
-    },
-    
-    /**
-     * Clear all logs
-     */
-    clear() {
-        this.logs = [];
-        if (this.enabled) {
-            console.clear();
-            console.log('%c🗑️ Logs cleared', 'color: #718096');
+    setLevel(level) {
+        if (this.levels.hasOwnProperty(level)) {
+            this.currentLevel = this.levels[level];
         }
+    },
+    
+    /**
+     * Enable/disable logging
+     */
+    setEnabled(enabled) {
+        this.enabled = enabled;
     }
 };
 
-// Global error handler
-window.addEventListener('error', function(event) {
-    Logger.error('Uncaught JavaScript Error', {
-        message: event.message,
-        filename: event.filename,
-        lineno: event.lineno,
-        colno: event.colno,
-        error: event.error?.stack
-    });
-});
-
-// Unhandled promise rejection handler
-window.addEventListener('unhandledrejection', function(event) {
-    Logger.error('Unhandled Promise Rejection', {
-        reason: event.reason,
-        promise: event.promise
-    });
-});
-
 // Export to window
 window.Logger = Logger;
+
+// Log that logger is loaded
+console.log('✅ Logger initialized');

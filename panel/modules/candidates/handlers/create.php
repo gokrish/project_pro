@@ -63,7 +63,7 @@ try {
             professional_summary, work_authorization_id,
             current_salary, expected_salary, notice_period_days, available_from,
             status, lead_type, created_by, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', 'Warm', ?, NOW())
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', 'Warm', ?, NOW())
     ");
     
     $userCode = Auth::userCode();

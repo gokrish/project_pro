@@ -10,6 +10,7 @@ use ProConsultancy\Core\Database;
 use ProConsultancy\Core\Auth;
 use ProConsultancy\Core\CSRFToken;
 use ProConsultancy\Core\Logger;
+use ProConsultancy\Core\Mailer;
 
 Permission::require('jobs', 'approve');
 

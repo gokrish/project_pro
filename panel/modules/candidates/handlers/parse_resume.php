@@ -1,152 +1,102 @@
 <?php
 /**
- * Export Candidates to CSV
- * 
- * @version 2.0
+ * Parse Resume Handler
+ * Handles AJAX resume upload and parsing
  */
 
 require_once __DIR__ . '/../../_common.php';
+require_once __DIR__ . '/../lib/ResumeParser.php';
+require_once __DIR__ . '/../lib/SkillExtractor.php';
 
-use ProConsultancy\Core\Permission;
-use ProConsultancy\Core\Database;
+use ProConsultancy\Core\{Auth, Permission};
+use ProConsultancy\Candidates\{ResumeParser, SkillExtractor};
 
-// Check permission
-Permission::require('candidates', 'view');
+header('Content-Type: application/json');
 
-// Get filters from query string
-$filters = $_GET;
-
-// Build WHERE clause (same as list.php)
-$db = Database::getInstance();
-$conn = $db->getConnection();
-
-$whereConditions = ['1=1'];
-$params = [];
-$types = '';
-
-// Row-level security
-$accessFilter = Permission::getAccessibleCandidates();
-if ($accessFilter) {
-    $whereConditions[] = "({$accessFilter})";
+// Permission check
+if (!Permission::can('candidates', 'create')) {
+    echo json_encode(['success' => false, 'message' => 'No permission']);
+    exit;
 }
 
-// Apply all filters (same logic as list.php)
-// Search, status, lead_type, assigned_to, etc.
-if (!empty($filters['search'])) {
-    $whereConditions[] = "(candidate_name LIKE ? OR email LIKE ? OR phone LIKE ?)";
-    $searchTerm = '%' . $filters['search'] . '%';
-    $params[] = $searchTerm;
-    $params[] = $searchTerm;
-    $params[] = $searchTerm;
-    $types .= 'sss';
-}
-
-if (!empty($filters['status'])) {
-    $whereConditions[] = "status = ?";
-    $params[] = $filters['status'];
-    $types .= 's';
-}
-
-if (!empty($filters['lead_type'])) {
-    $whereConditions[] = "lead_type = ?";
-    $params[] = $filters['lead_type'];
-    $types .= 's';
-}
-
-// ... other filters ...
-
-$whereClause = implode(' AND ', $whereConditions);
-
-// Get candidates
-$sql = "
-    SELECT 
-        c.candidate_code,
-        c.candidate_name,
-        c.email,
-        c.phone,
-        c.current_position,
-        c.current_company,
-        c.total_experience,
-        c.skills,
-        c.current_location,
-        c.work_authorization_status,
-        c.status,
-        c.lead_type,
-        c.rating,
-        u.name as assigned_to_name,
-        c.created_at,
-        c.updated_at
-    FROM candidates c
-    LEFT JOIN users u ON c.assigned_to = u.user_code
-    WHERE {$whereClause}
-    ORDER BY c.updated_at DESC
-";
-
-$stmt = $conn->prepare($sql);
-if (!empty($params)) {
-    $stmt->bind_param($types, ...$params);
-}
-$stmt->execute();
-$candidates = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-
-// Set headers for CSV download
-header('Content-Type: text/csv; charset=utf-8');
-header('Content-Disposition: attachment; filename="candidates_export_' . date('Y-m-d_His') . '.csv"');
-
-// Create output stream
-$output = fopen('php://output', 'w');
-
-// Write UTF-8 BOM for Excel compatibility
-fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
-
-// Write CSV headers
-fputcsv($output, [
-    'Candidate Code',
-    'Name',
-    'Email',
-    'Phone',
-    'Position',
-    'Company',
-    'Experience (Years)',
-    'Skills',
-    'Location',
-    'Work Authorization',
-    'Status',
-    'Lead Type',
-    'Rating',
-    'Assigned To',
-    'Created Date',
-    'Last Updated'
-]);
-
-// Write data rows
-foreach ($candidates as $candidate) {
-    fputcsv($output, [
-        $candidate['candidate_code'],
-        $candidate['candidate_name'],
-        $candidate['email'],
-        $candidate['phone'],
-        $candidate['current_position'] ?: '',
-        $candidate['current_company'] ?: '',
-        $candidate['total_experience'],
-        $candidate['skills'] ?: '',
-        $candidate['current_location'] ?: '',
-        $candidate['work_authorization_status'],
-        $candidate['status'],
-        $candidate['lead_type'],
-        $candidate['rating'],
-        $candidate['assigned_to_name'] ?: 'Unassigned',
-        date('Y-m-d H:i:s', strtotime($candidate['created_at'])),
-        date('Y-m-d H:i:s', strtotime($candidate['updated_at']))
+try {
+    // Validate file upload
+    if (!isset($_FILES['resume']) || $_FILES['resume']['error'] !== UPLOAD_ERR_OK) {
+        throw new \Exception('No file uploaded or upload error');
+    }
+    
+    $file = $_FILES['resume'];
+    
+    // Validate file type
+    $allowedTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    $allowedExtensions = ['pdf', 'docx'];
+    
+    $fileType = $file['type'];
+    $fileExt = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    
+    if (!in_array($fileType, $allowedTypes) && !in_array($fileExt, $allowedExtensions)) {
+        throw new \Exception('Invalid file type. Only PDF and DOCX are supported.');
+    }
+    
+    // Validate file size (max 5MB)
+    if ($file['size'] > 5 * 1024 * 1024) {
+        throw new \Exception('File too large. Maximum size is 5MB.');
+    }
+    
+    // Create temp directory if not exists
+    $tempDir = __DIR__ . '/../uploads/temp/';
+    if (!is_dir($tempDir)) {
+        mkdir($tempDir, 0755, true);
+    }
+    
+    // Generate unique filename
+    $tempFile = $tempDir . uniqid('resume_') . '.' . $fileExt;
+    
+    // Move uploaded file
+    if (!move_uploaded_file($file['tmp_name'], $tempFile)) {
+        throw new \Exception('Failed to save uploaded file');
+    }
+    
+    // Parse resume
+    $parser = new ResumeParser($tempFile);
+    $parseResult = $parser->parse();
+    
+    if (!$parseResult['success']) {
+        throw new \Exception('Failed to parse resume: ' . $parseResult['error']);
+    }
+    
+    // Extract skills
+    $skillExtractor = new SkillExtractor($parser->getRawText());
+    $skills = $skillExtractor->extract();
+    
+    // Clean up temp file
+    @unlink($tempFile);
+    
+    // Return parsed data
+    echo json_encode([
+        'success' => true,
+        'data' => [
+            'name' => $parseResult['data']['name'] ?? '',
+            'email' => $parseResult['data']['email'] ?? '',
+            'phone' => $parseResult['data']['phone'] ?? '',
+            'linkedin_url' => $parseResult['data']['linkedin_url'] ?? '',
+            'location' => $parseResult['data']['location'] ?? 'Belgium',
+            'skills' => $skills,
+            'raw_text' => $parser->getRawText(),
+            'parse_status' => $parseResult['parse_status']
+        ],
+        'message' => 'Resume parsed successfully. Please review and correct the information.'
+    ]);
+    
+} catch (\Exception $e) {
+    // Clean up temp file on error
+    if (isset($tempFile) && file_exists($tempFile)) {
+        @unlink($tempFile);
+    }
+    
+    echo json_encode([
+        'success' => false,
+        'message' => $e->getMessage()
     ]);
 }
-
-fclose($output);
-
-// Log export
-Logger::getInstance()->logActivity('export', 'candidates', null, 'Exported candidates to CSV', [
-    'count' => count($candidates),
-    'filters' => $filters
-]);
-
-exit;
+?>

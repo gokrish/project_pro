@@ -53,10 +53,11 @@ CREATE TABLE `candidates` (
     ),
     `work_authorization_id` INT COMMENT 'FK to work_authorization',
     `professional_summary` TEXT,
+    `years_experience` TINYINT UNSIGNED NOT NULL DEFAULT 0,
     `role_addressed` TEXT DEFAULT NULL,
     
     -- ========== KNOWN Languages INFO ==========
-    `languages` JSON COMMENT '["English","French","Dutch"]',
+    `languages` JSON COMMENT '["English","French","Dutch","German"]',
     
     -- ========== COMPENSATION (Both models supported) ==========
     `current_salary` DECIMAL(12,2) COMMENT 'Annual for employees',
@@ -65,7 +66,7 @@ CREATE TABLE `candidates` (
     `expected_daily_rate` DECIMAL(10,2) COMMENT 'For freelancers',
     
     -- ========== AVAILABILITY ==========
-    `notice_period_days` INT COMMENT 'Notice period in days',
+    `notice_period_days` INT UNSIGNED DEFAULT 0 COMMENT 'Notice period in days',
     `available_from` DATE COMMENT 'When can start',
     
     -- ========== LEAD MANAGEMENT ==========
@@ -74,15 +75,18 @@ CREATE TABLE `candidates` (
     
     -- ========== STATUS WORKFLOW ==========
     `status` ENUM(
-        'new',          -- Just added
+        'open',         -- Active, ready (initial)
         'screening',    -- Being reviewed
-        'qualified',    -- Ready for jobs
-        'active',       -- Has active submissions
-        'placed',       -- Successfully placed
-        'rejected',     -- Failed screening
+        'qualified',    -- Passed screening
+        'active',       -- Available for jobs 
+        'interviewing', -- In interviews
+        'offered',      -- Has offer
+        'placed',       -- Working
+        'on_hold',      -- Temporarily unavailable
+        'rejected',     -- Failed
         'archived'      -- Inactive
-    ) DEFAULT 'new',
-    
+    ) DEFAULT 'open',
+
     `screening_completed_at` TIMESTAMP NULL,
     `screening_notes` TEXT,
     `screening_result` ENUM('pass', 'fail', 'pending') DEFAULT 'pending',
@@ -101,7 +105,7 @@ CREATE TABLE `candidates` (
     -- ========== CONSENT & GDPR ==========
     `consent_given` BOOLEAN DEFAULT 0,
     `consent_date` DATE,
-    `consent_type` ENUM('Email', 'Phone', 'InPerson', 'Online'),
+    `consent_type` ENUM('Email', 'LinkedIn', 'InPerson', 'Phone'),
     
     -- ========== OWNERSHIP ==========
     `assigned_to` VARCHAR(50) COMMENT 'user_code',
@@ -154,9 +158,7 @@ CREATE TABLE `work_authorization` (
 INSERT INTO `work_authorization` (`status_name`, `requires_sponsorship`, `display_order`) VALUES
 ('EU Citizen', 0, 1),
 ('Work Permit Holder', 0, 2),
-('Blue Card Holder', 0, 3),
 ('Require Sponsorship', 1, 4),
-('Student Visa', 1, 5),
 ('Other', 0, 6);
 
 -- ============================================================================
@@ -165,8 +167,7 @@ INSERT INTO `work_authorization` (`status_name`, `requires_sponsorship`, `displa
 CREATE TABLE `technical_skills` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `skill_name` VARCHAR(100) UNIQUE NOT NULL,
-    `category` VARCHAR(50),
-    `is_active` BOOLEAN DEFAULT 1,
+    `keywords` ,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX `idx_category` (`category`),
     INDEX `idx_active` (`is_active`),
@@ -174,27 +175,25 @@ CREATE TABLE `technical_skills` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Seed common skills
-INSERT IGNORE INTO `technical_skills` (`skill_name`, `category`, `is_active`) VALUES 
-('Java', 'Programming Language', 1),
-('Python', 'Programming Language', 1),
-('JavaScript', 'Programming Language', 1),
-('C#', 'Programming Language', 1),
-('PHP', 'Programming Language', 1),
-('Ruby', 'Programming Language', 1),
-('SQL', 'Database', 1),
-('MySQL', 'Database', 1),
-('PostgreSQL', 'Database', 1),
-('MongoDB', 'Database', 1),
-('React', 'Framework', 1),
-('Angular', 'Framework', 1),
-('Vue.js', 'Framework', 1),
-('Node.js', 'Framework', 1),
-('Spring Boot', 'Framework', 1),
-('Django', 'Framework', 1),
-('AWS', 'Cloud', 1),
-('Azure', 'Cloud', 1),
-('Docker', 'DevOps', 1),
-('Kubernetes', 'DevOps', 1);
+INSERT INTO technical_skills (skill_name, skill_category, keywords) VALUES
+-- Programming Languages
+('Java',  '["Java", "J2EE", "JDK", "JSE", "JEE"]'),
+('JavaScript',  '["JavaScript", "JS", "ECMAScript", "ES6"]'),
+('Python',  '["Python", "Python3", "Python2"]'),
+('PHP',  '["PHP", "PHP7", "PHP8"]'),
+('C#',  '["C#", "CSharp", "C-Sharp", ".NET"]'),
+('React','["React", "ReactJS", "React.js"]'),
+('Angular', '["Angular", "AngularJS"]'),
+('Spring',  '["Spring", "Spring Boot", "Spring Framework"]'),
+('Node.js', '["Node", "NodeJS", "Node.js"]'),
+-- Databases
+('MySQL', '["MySQL", "My SQL"]'),
+('PostgreSQL', '["PostgreSQL", "Postgres"]'),
+('MongoDB', '["MongoDB", "Mongo"]'),
+('Oracle', '["Oracle DB", "Oracle Database"]'),
+-- DevOps
+('DevOps', '["Docker", "Kubernetes","Git"]'),
+('Cloud','["AWS", "Azure","GCP"]'),
 
 -- ============================================================================
 -- 4. CANDIDATE SKILLS (Normalized for filtering)

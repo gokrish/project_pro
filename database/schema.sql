@@ -25,7 +25,6 @@ DROP TABLE IF EXISTS `submission_status_history`;
 DROP TABLE IF EXISTS `job_status_history`;
 DROP TABLE IF EXISTS `candidate_status_history`;
 DROP TABLE IF EXISTS `submissions`;
-DROP TABLE IF EXISTS `applications`;
 DROP TABLE IF EXISTS `candidate_submissions`;
 DROP TABLE IF EXISTS `activity_log`;
 DROP TABLE IF EXISTS `notes`;
@@ -395,6 +394,8 @@ CREATE TABLE `jobs` (
     `total_submissions` INT DEFAULT 0,
     `total_interviews` INT DEFAULT 0,
     `total_placements` INT DEFAULT 0,
+    `submissions_count` INT DEFAULT 0,
+    `placed_count` INT DEFAULT 0;
     
     -- Assignment
     `assigned_recruiter` VARCHAR(50) NULL COMMENT 'Primary recruiter handling this job',
@@ -458,7 +459,7 @@ CREATE TABLE `submissions` (
         'withdrawn'     -- Withdrawn after sending
     ) DEFAULT 'not_sent',
     
-    -- ========== NOTES ONLY (No payment fields) ==========
+    -- ========== NOTES ONLY ==========
     `submission_notes` TEXT COMMENT 'Initial submission notes',
     
     -- ========== INTERNAL APPROVAL ==========
@@ -515,7 +516,7 @@ COMMENT='Simplified submissions - NO payment fields, notes only for tracking';
 -- ============================================================================
 
 -- Contacts (Lead management)
-CREATE TABLE IF NOT EXISTS `contacts` (
+CREATE TABLE `contacts` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `contact_code` VARCHAR(50) UNIQUE NOT NULL,
     `name` VARCHAR(255) NOT NULL,
@@ -775,7 +776,7 @@ INSERT INTO `users` (`user_code`, `name`, `email`, `password`, `level`, `is_acti
 ('USR01', 'Team User', 'user@test.com', 'user123', 'user', 1);
 
 
--- Notifications table (for Notification.php class)
+-- Notifications table 
 CREATE TABLE IF NOT EXISTS `notifications` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `user_code` VARCHAR(50) NOT NULL,
@@ -820,12 +821,12 @@ CREATE TRIGGER `after_submission_insert`
 AFTER INSERT ON `submissions`
 FOR EACH ROW
 BEGIN
-    -- Update candidate to active
+    -- Update candidate to submitted
     UPDATE candidates 
     SET status = 'active',
         total_submissions = total_submissions + 1
     WHERE candidate_code = NEW.candidate_code
-    AND status IN ('qualified', 'new');
+    AND status IN ('qualified', 'open');
     
     -- Update job
     UPDATE jobs
